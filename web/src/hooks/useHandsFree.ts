@@ -265,6 +265,13 @@ export function useHandsFree(onCommand: (text: string) => void, paused: boolean)
     [armCommandTimer, armIdleTimer, connect, setPhase, stop],
   );
 
+  /** Alexa just asked a question: take the next sentence as the answer, no "Alexa" needed. */
+  const expectAnswer = useCallback(() => {
+    if (!activeRef.current || phaseRef.current !== 'waiting') return;
+    setPhase('command');
+    armCommandTimer();
+  }, [armCommandTimer, setPhase]);
+
   // iPhones may end the microphone while a reply plays through the loudspeaker; reopen it afterwards.
   useEffect(() => {
     if (paused || !activeRef.current) return;
@@ -278,5 +285,5 @@ export function useHandsFree(onCommand: (text: string) => void, paused: boolean)
 
   useEffect(() => () => stop(), [stop]);
 
-  return { supported: handsFreeSupported, phase, interim, error, start, stop };
+  return { supported: handsFreeSupported, phase, interim, error, start, stop, expectAnswer };
 }

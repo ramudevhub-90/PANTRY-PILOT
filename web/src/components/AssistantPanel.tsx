@@ -62,6 +62,17 @@ export function AssistantPanel() {
     }
   }
 
+  // When a reply ends with a question, listen for the answer without waiting for "Alexa" again.
+  const expectAnswer = handsFree.expectAnswer;
+  const previousMode = useRef(state.mode);
+  useEffect(() => {
+    const was = previousMode.current;
+    previousMode.current = state.mode;
+    if (state.mode !== 'idle' || (was !== 'speaking' && was !== 'thinking')) return;
+    const last = state.messages[state.messages.length - 1];
+    if (last?.role === 'assistant' && !last.pending && /\?\s*$/.test(last.text)) expectAnswer();
+  }, [state.mode, state.messages, expectAnswer]);
+
   // Hands-free is on by default; switching it off is remembered on this device.
   const startHandsFree = handsFree.start;
   useEffect(() => {

@@ -63,6 +63,10 @@ class OriginSecretMiddleware:
         await self.app(scope, receive, send)
 
 
+CHAT_KEEP_SECONDS = 30 * 60
+"""A conversation older than this starts fresh."""
+
+
 def create_app(
     store: Store | None = None,
     nova: Nova | None = None,
@@ -89,7 +93,15 @@ def create_app(
         return current_user.get() or default_household
 
     mcp = create_server(store, nova, household_id_now)
-    histories: dict[str, list[dict[str, Any]]] = {}
+
+    # The conversation is kept in the store, not in memory: Lambda runs several copies of the server
+    # and replaces idle ones, so in-memory history made the assistant forget mid-conversation.
+    def chat_key() -> str:
+        return f"{household_id_now()}#chat"
+
+    def load_chat() -> list[dict[str, Any]]:
+        saved = store.load_record(chat_key()) or {}
+        return saved.get("messages", []) if time.time() - saved.get("at", 0) < CHAT_KEEP_SECONDS else []
 
     @mcp.custom_route("/api/config", methods=["GET"])
     async def config(_: Request) -> Response:
@@ -237,9 +249,15 @@ def create_app(
             yield {"type": "reply", "text": "I didn't catch that. Could you say it again?"}
             return
         try:
-            history = histories.setdefault(household_id_now(), [])
-            async for event in run_agent(text, history, client, nova):
-                yield event
+            history = await anyio.to_thread.run_sync(load_chat)
+            before = len(history)
+            try:
+                async for event in run_agent(text, history, client, nova):
+                    yield event
+            finally:
+                if len(history) != before:
+                    record = {"messages": history, "at": time.time()}
+                    await anyio.to_thread.run_sync(store.save_record, chat_key(), record)
         except NovaUnavailable as err:
             yield {"type": "reply", "text": str(err)}
 

@@ -133,3 +133,29 @@ def test_mcp_endpoint_serves_tools_over_streamable_http(store):
         )
     assert response.status_code == 200
     assert response.json()["result"]["serverInfo"]["name"] == "pantry-pilot"
+
+
+def test_conversation_survives_a_new_server_instance(store):
+    first = ScriptedNova([text("Fajita tacos tonight. Start the timer?")])
+    with TestClient(create_app(store, first, "alice")) as client:
+        turn(client, {"text": "What's for dinner?"})
+
+    # Lambda may route the follow-up to a different copy of the server.
+    second = ScriptedNova([text("Timer started.")])
+    with TestClient(create_app(store, second, "alice")) as client:
+        turn(client, {"text": "Yes please"})
+
+    sent = [m["content"][0]["text"] for m in second.calls[0]["messages"]]
+    assert sent == ["What's for dinner?", "Fajita tacos tonight. Start the timer?", "Yes please"]
+
+
+def test_old_conversation_starts_fresh(store, monkeypatch):
+    with TestClient(create_app(store, ScriptedNova([text("Hi there.")]), "alice")) as client:
+        turn(client, {"text": "Hello"})
+    record = store.load_record("alice#chat")
+    store.save_record("alice#chat", record | {"at": record["at"] - 31 * 60})
+
+    nova = ScriptedNova([text("Hello again.")])
+    with TestClient(create_app(store, nova, "alice")) as client:
+        turn(client, {"text": "Hi"})
+    assert [m["content"][0]["text"] for m in nova.calls[0]["messages"]] == ["Hi"]
