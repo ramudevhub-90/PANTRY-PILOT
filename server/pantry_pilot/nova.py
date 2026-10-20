@@ -183,6 +183,8 @@ class Nova(Protocol):
 
     def suggest_meals(self, system: str, request: str) -> list[dict[str, Any]]: ...
 
+    def extract(self, system: str, text: str, name: str, schema: dict[str, Any]) -> dict[str, Any]: ...
+
 
 def _clean_detection(raw: dict[str, Any]) -> DetectedItem | None:
     """Coerce model output into a valid DetectedItem, dropping anything unusable."""
@@ -299,6 +301,22 @@ class BedrockNova:
                 return list(block["toolUse"]["input"].get("meals") or [])
         return []
 
+    def extract(self, system: str, text: str, name: str, schema: dict[str, Any]) -> dict[str, Any]:
+        """Structured fields from a shopping app's raw reply (search results, a bill), as the input
+        of a forced `name` tool with this JSON schema."""
+        response = self.converse(
+            system=system,
+            messages=[{"role": "user", "content": [{"text": text[:60_000]}]}],
+            tools=[{"toolSpec": {"name": name, "description": "Report the fields.", "inputSchema": {"json": schema}}}],
+            tool_choice={"tool": {"name": name}},
+            max_tokens=4000,
+            temperature=0.0,
+        )
+        for block in response["output"]["message"]["content"]:
+            if "toolUse" in block:
+                return dict(block["toolUse"]["input"])
+        return {}
+
     def read_orders(self, raw: list[str]) -> list[OrderRead]:
         """Turn whatever a grocery app's order tools returned into orders with clean pantry items."""
         content = [{"text": f"--- Data {i + 1} ---\n{text[:60_000]}"} for i, text in enumerate(raw)]
@@ -338,6 +356,9 @@ class MockNova:
 
     def suggest_meals(self, system: str, request: str) -> list[dict[str, Any]]:
         raise NovaUnavailable("Meal ideas need Amazon Nova; using the built-in recipes.")
+
+    def extract(self, system: str, text: str, name: str, schema: dict[str, Any]) -> dict[str, Any]:
+        raise NovaUnavailable("Shopping needs Amazon Nova, which this server is simulating for now.")
 
     def read_orders(self, raw: list[str]) -> list[OrderRead]:
         # Offline stand-in: accept data already shaped like report_orders' input ({"orders": [...]}).

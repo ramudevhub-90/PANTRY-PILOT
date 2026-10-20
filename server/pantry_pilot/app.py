@@ -18,7 +18,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 
-from . import connectors, voice
+from . import connectors, ordering, voice
 from .agent import call_tool_with_events, run_agent
 from .auth import (
     ALL_SCOPES,
@@ -41,7 +41,7 @@ from .kroger import CART_URL, Kroger, KrogerError, kroger_from_env
 from .mcp_server import CONFIDENT, create_server
 from .mealtime import TimezoneMiddleware
 from .notify import WHATSAPP_TEMPLATES, Message, Notifier, NotifyUnavailable, normalise_whatsapp
-from .models import GroceryItem
+from .models import GroceryItem, new_id
 from .nova import BedrockNova, Nova, NovaUnavailable, nova_from_env
 from .store import Store, dumps_for_api, store_from_env
 
@@ -207,9 +207,14 @@ def create_app(
         body = await request.json()
 
         async def events() -> AsyncIterator[str]:
-            async with Client(mcp) as client:
-                async for event in _turn_events(body, client):
-                    yield f"data: {json.dumps(event)}\n\n"
+            # Set before the MCP client starts, so its tool calls (place_order) see this turn's words.
+            turn = ordering.current_turn.set({"id": new_id(), "text": str(body.get("text", "")).strip()})
+            try:
+                async with Client(mcp) as client:
+                    async for event in _turn_events(body, client):
+                        yield f"data: {json.dumps(event)}\n\n"
+            finally:
+                ordering.current_turn.reset(turn)
             household = json.loads(dumps_for_api(store.load(household_id_now())))
             yield f"data: {json.dumps({'type': 'state', 'state': household})}\n\n"
 
@@ -374,6 +379,151 @@ def create_app(
             if orders else f"No new delivered {provider.name} orders"
         )
         return {"summary": summary, "orders": result.new_orders, "items": [i.name for i in result.items]}
+
+    # ---------- Price comparison and confirmed ordering (see ordering.py for the rules) ----------
+
+    def connected_shops() -> list[connectors.Provider]:
+        user = household_id_now()
+        return [
+            p for p in connectors.PROVIDERS.values()
+            if p.id in ordering.SHOP_TOOLS and store.load_record(f"{user}#connector#{p.id}")
+        ]
+
+    def shopping_items(items: list[str] | None) -> list[str]:
+        wanted = [i.strip() for i in items or [] if i.strip()]
+        if not wanted:
+            wanted = [g.name for g in store.load(household_id_now()).grocery if not g.checked]
+        if not wanted:
+            raise ordering.OrderError("Your grocery list is empty. Tell me what to buy.")
+        return wanted[:12]
+
+    @mcp.tool(title="Compare grocery prices")
+    async def compare_grocery_prices(items: list[str] | None = None) -> dict[str, Any]:
+        """India: compare prices for these items (default: the open grocery list) on every connected
+        app (Swiggy Instamart, Zepto) at the user's saved address. Read the cheapest app and its
+        total back; offer to prepare the order there. Never orders anything."""
+        user = household_id_now()
+        try:
+            wanted = shopping_items(items)
+            shops = connected_shops()
+            if not shops:
+                raise ordering.OrderError("Connect Zepto or Swiggy Instamart first, under Shopping apps.")
+            quotes: list[ordering.Quote] = []
+            errors: dict[str, str] = {}
+
+            async def one(p: connectors.Provider) -> None:
+                try:
+                    async with ordering.app_session(store, user, p, connector_client) as s:
+                        quotes.append(await ordering.quote(s, nova, wanted))
+                except (ordering.OrderError, connectors.ConnectorError, NovaUnavailable) as err:
+                    errors[p.name] = str(err)
+
+            async with anyio.create_task_group() as tg:
+                for p in shops:
+                    tg.start_soon(one, p)
+        except ordering.OrderError as err:
+            return {"summary": str(err), "apps": []}
+        await anyio.to_thread.run_sync(ordering.save_comparison, store, user, quotes)
+        complete = sorted((q for q in quotes if not q.missing), key=lambda q: q.total)
+        rows = [
+            {
+                "app": connectors.PROVIDERS[q.app].name,
+                "total": q.total,
+                "items": [{"item": p.item, "product": f"{p.name} {p.pack}".strip(), "price": p.price} for p in q.picks],
+                "missing": q.missing,
+            }
+            for q in sorted(quotes, key=lambda q: (bool(q.missing), q.total))
+        ]
+        if complete:
+            best = complete[0]
+            summary = f"Cheapest: {connectors.PROVIDERS[best.app].name} at {ordering.rupees(best.total)} for {len(wanted)} items (before fees)"
+        elif quotes:
+            summary = "No app has everything; see what's missing per app"
+        else:
+            summary = "; ".join(f"{k}: {v}" for k, v in errors.items()) or "No prices found"
+        return {"summary": summary, "apps": rows, "errors": errors}
+
+    @mcp.tool(title="Prepare an order")
+    async def prepare_order(app: Literal["zepto", "swiggy"], items: list[str] | None = None) -> dict[str, Any]:
+        """India: fill the user's Zepto or Swiggy Instamart cart with these items (default: the open
+        grocery list) and get the bill. Does NOT order. Read the returned `readback` to the user
+        word for word; they must then say "place the order" for place_order to work."""
+        user = household_id_now()
+        provider = connectors.PROVIDERS[app]
+        try:
+            wanted = shopping_items(items)
+            async with ordering.app_session(store, user, provider, connector_client) as s:
+                q = ordering.saved_quote(store, user, app, wanted)
+                if q:
+                    await s.call("select_saved_address", {"addressId": q.address_id}) if app == "zepto" else None
+                else:
+                    q = await ordering.quote(s, nova, wanted)
+                if not q.picks:
+                    raise ordering.OrderError(f"I couldn't find those items on {provider.name}.")
+                bill = await ordering._fill_and_bill(s, nova, q, user)
+        except (ordering.OrderError, connectors.ConnectorError, NovaUnavailable) as err:
+            return {"summary": str(err), "readback": str(err)}
+        draft = ordering.save_draft(store, user, q, bill)
+        text = ordering.readback(q, bill, draft["payment"], provider)
+        return {"summary": f"{provider.name} cart ready · {ordering.rupees(bill['total'])}", "readback": text}
+
+    @mcp.tool(title="Place the order")
+    async def place_order() -> dict[str, Any]:
+        """India: place the order prepared by prepare_order. Only works in a later turn where the user
+        said "place the order" themselves; never call it on "yes", "ok" or your own initiative.
+        Repeat the returned summary to the user."""
+        user = household_id_now()
+        try:
+            draft = ordering.confirmed_draft(store, user)
+            provider = connectors.PROVIDERS[draft["app"]]
+            async with ordering.app_session(store, user, provider, connector_client) as s:
+                result = await ordering.place(s, nova, draft, user)
+        except (ordering.OrderError, connectors.ConnectorError, NovaUnavailable) as err:
+            return {"summary": str(err), "placed": False}
+        ordering.clear_draft(store, user)
+        if not result["placed"]:
+            return {"summary": result["message"] or f"{provider.name} didn't place the order.", "placed": False}
+        await notify_order(provider, draft, result)
+        how = "cash on delivery" if draft["payment"] == "cod" else "I've sent you the payment link"
+        return {
+            "summary": f"{provider.name} order placed, {ordering.rupees(result['total'])}, {how}.",
+            "placed": True,
+            "orderId": result["order_id"],
+            "message": result["message"],
+        }
+
+    async def notify_order(provider: connectors.Provider, draft: dict[str, Any], result: dict[str, Any]) -> None:
+        """Email (and WhatsApp, when set up) the order summary or payment link; never blocks the order."""
+        user = household_id_now()
+        picks = draft["quote"]["picks"]
+        items = [{"name": f"{p['name']} {p['pack']}".strip(), "quantity": str(p["quantity"]), "price": ordering.rupees(p["price"])} for p in picks]
+        total = ordering.rupees(result["total"])
+        link = result["payment_url"]
+        message = Message(
+            subject=f"{provider.name} order {'placed' if not link else 'waiting for payment'} · {total}",
+            heading=f"Your {provider.name} order is {'placed' if not link else 'waiting for payment'}",
+            intro=f"Pantry Pilot placed it after you said “place the order”. Delivery to {draft['quote']['address']}.",
+            items=items,
+            total=f"{total} · {'cash on delivery' if not link else 'pay online'}",
+            button={"label": f"Pay {total} on {provider.name}", "url": link} if link else None,
+            footer=f"Order {result['order_id']}. To cancel, use the {provider.name} app." if result["order_id"] else f"To cancel, use the {provider.name} app.",
+        )
+        try:
+            await anyio.to_thread.run_sync(notifier.email, user, message)
+        except Exception:
+            log.warning("Order email failed", exc_info=True)
+        number = store.load(user).notifications.whatsapp
+        if number:
+            names = ", ".join(i["name"] for i in items)[:200]
+            template, params = (
+                (WHATSAPP_TEMPLATES["payment_link"], [provider.name, total, link])
+                if link
+                else (WHATSAPP_TEMPLATES["order_placed"], [provider.name, names, total, "cash on delivery"])
+            )
+            try:
+                await anyio.to_thread.run_sync(notifier.whatsapp, number, template, params)
+            except Exception:
+                log.warning("Order WhatsApp failed", exc_info=True)
 
     @mcp.tool(title="Sync grocery orders")
     async def sync_grocery_orders(app: Literal["zepto", "swiggy"]) -> dict[str, Any]:
