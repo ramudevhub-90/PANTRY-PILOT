@@ -78,6 +78,19 @@ export function useSpeechRecognition(onFinal: (text: string) => void) {
 
 export const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window;
 
+// Phone browsers only let a page talk after the user has tapped it, and replies to hands-free
+// requests arrive with no tap at all. A silent utterance on the first tap unlocks speech for the
+// rest of the visit.
+if (canSpeak) {
+  const unlock = () => {
+    const silent = new SpeechSynthesisUtterance(' ');
+    silent.volume = 0;
+    window.speechSynthesis.speak(silent);
+  };
+  window.addEventListener('pointerdown', unlock, { once: true, capture: true });
+  window.addEventListener('keydown', unlock, { once: true, capture: true });
+}
+
 function pickVoice(): SpeechSynthesisVoice | undefined {
   const voices = window.speechSynthesis.getVoices();
   const preferred = ['Samantha', 'Google US English', 'Microsoft Aria Online (Natural) - English (United States)'];
