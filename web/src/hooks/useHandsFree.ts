@@ -55,7 +55,23 @@ registerProcessor('pcm-chunker', PcmChunker);
 
 interface TranscriptResult {
   IsPartial: boolean;
-  Alternatives?: { Transcript: string }[];
+  Alternatives?: { Transcript: string; Items?: { Type: string; Confidence?: number }[] }[];
+}
+
+/** Transcribe's average word confidence, 0–1 (1 when it doesn't say). Noise scores low. */
+function confidence(result: TranscriptResult): number {
+  const scores = (result.Alternatives?.[0]?.Items ?? [])
+    .filter((i) => i.Type === 'pronunciation' && typeof i.Confidence === 'number')
+    .map((i) => i.Confidence as number);
+  return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 1;
+}
+
+/** How sure Transcribe must be before acting. Short answers to Alexa's question ("ok", "yes")
+ * start timers and the like, and background noise often comes out as exactly those words. */
+function trusted(text: string, score: number, answering: boolean): boolean {
+  const words = text.match(/[\p{L}\p{N}']+/gu)?.length ?? 0;
+  if (answering) return score >= (words <= 2 ? 0.9 : 0.75);
+  return score >= (words <= 1 ? 0.8 : 0.5);
 }
 
 /** The speech model to use. Browsers in India often report en-US or en-GB, so the time zone also
@@ -92,6 +108,8 @@ export function useHandsFree(onCommand: (text: string) => void, paused: boolean)
   const commandTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const activeRef = useRef(false);
+  /** In the few seconds after Alexa asked a question (stricter about noise). */
+  const answeringRef = useRef(false);
 
   useEffect(() => {
     onCommandRef.current = onCommand;
@@ -103,6 +121,7 @@ export function useHandsFree(onCommand: (text: string) => void, paused: boolean)
 
   const setPhase = useCallback((p: HandsFreePhase) => {
     phaseRef.current = p;
+    if (p !== 'command') answeringRef.current = false;
     setPhaseState(p);
   }, []);
 
@@ -154,9 +173,11 @@ export function useHandsFree(onCommand: (text: string) => void, paused: boolean)
   );
 
   const handleFinal = useCallback(
-    (text: string) => {
+    (text: string, score: number) => {
       if (pausedRef.current || !text.trim() || FILLER.test(text.trim())) return;
       if (phaseRef.current === 'command') {
+        if (!trusted(text, score, answeringRef.current)) return; // probably noise: keep listening
+        answeringRef.current = false;
         runCommand(text.trim());
         return;
       }
@@ -164,7 +185,7 @@ export function useHandsFree(onCommand: (text: string) => void, paused: boolean)
       if (!wake) return;
       const rest = text.slice(wake.index + wake[0].length).trim();
       if (/\w{2,}/.test(rest)) {
-        runCommand(rest);
+        if (trusted(rest, score, false)) runCommand(rest);
       } else {
         setPhase('command');
         armCommandTimer();
@@ -197,7 +218,7 @@ export function useHandsFree(onCommand: (text: string) => void, paused: boolean)
             setInterim(text);
           }
         } else {
-          handleFinal(text);
+          handleFinal(text, confidence(result));
         }
       }
     };
@@ -268,6 +289,7 @@ export function useHandsFree(onCommand: (text: string) => void, paused: boolean)
   /** Alexa just asked a question: take the next sentence as the answer, no "Alexa" needed. */
   const expectAnswer = useCallback(() => {
     if (!activeRef.current || phaseRef.current !== 'waiting') return;
+    answeringRef.current = true;
     setPhase('command');
     armCommandTimer();
   }, [armCommandTimer, setPhase]);
