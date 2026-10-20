@@ -174,6 +174,7 @@ class Nova(Protocol):
         tools: list[dict[str, Any]] | None = None,
         tool_choice: dict[str, Any] | None = None,
         max_tokens: int = 1024,
+        temperature: float = 0.3,
     ) -> dict[str, Any]: ...
 
     def detect_items(self, media: list[Media], kind: str) -> list[DetectedItem]: ...
@@ -246,6 +247,7 @@ class BedrockNova:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: dict[str, Any] | None = None,
         max_tokens: int = 1024,
+        temperature: float = 0.3,
     ) -> dict[str, Any]:
         from botocore.exceptions import ClientError
 
@@ -253,7 +255,7 @@ class BedrockNova:
             "modelId": self.model_id,
             "system": [{"text": system}],
             "messages": messages,
-            "inferenceConfig": {"maxTokens": max_tokens, "temperature": 0.3},
+            "inferenceConfig": {"maxTokens": max_tokens, "temperature": temperature},
         }
         if tools:
             kwargs["toolConfig"] = {"tools": tools, **({"toolChoice": tool_choice} if tool_choice else {})}
@@ -289,7 +291,8 @@ class BedrockNova:
             messages=[{"role": "user", "content": [{"text": request}]}],
             tools=[SUGGEST_TOOL],
             tool_choice={"tool": {"name": "suggest_meals"}},
-            max_tokens=3000,
+            max_tokens=4000,
+            temperature=0.9,  # variety: re-planning should bring new dishes
         )
         for block in response["output"]["message"]["content"]:
             if "toolUse" in block:

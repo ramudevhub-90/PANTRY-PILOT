@@ -283,6 +283,17 @@ def create_app(
             return JSONResponse({"error": "Couldn't add that item"}, status_code=400)
         return state_response()
 
+    @mcp.custom_route("/api/plan", methods=["POST"])
+    async def plan(request: Request) -> Response:
+        """A fresh meal plan from the dashboard: {meal?, request?}. Same MCP tool as voice."""
+        body = await request.json() if await request.body() else {}
+        args = {k: body[k] for k in ("meal", "request") if body.get(k)}
+        async with Client(mcp) as client:
+            result = await client.call_tool("plan_meals", args)
+        if result.is_error:
+            return JSONResponse({"error": "Couldn't plan meals right now"}, status_code=400)
+        return state_response()
+
     @mcp.custom_route("/api/preferences", methods=["POST"])
     async def set_preferences(request: Request) -> Response:
         """Food preferences from the dashboard: {diet?, cuisines?, avoid?}. Same MCP tool as voice."""

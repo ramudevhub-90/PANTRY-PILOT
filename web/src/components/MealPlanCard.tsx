@@ -1,4 +1,6 @@
+import { useEffect, useRef, useState } from 'react';
 import { Clock, Leaf, RefreshCw, ShoppingBasket, Timer, Users, UtensilsCrossed } from 'lucide-react';
+import { HAS_SERVER, api } from '../agent/remote';
 import { useAssistant } from '../agent/useAssistant';
 import { FoodPreferences } from './FoodPreferences';
 import { joinNames, lower } from '../lib/format';
@@ -6,11 +8,40 @@ import { currentOccasion, planTitle } from '../lib/mealtime';
 import { usePantry } from '../state/store';
 
 export function MealPlanCard() {
-  const { state } = usePantry();
+  const { state, dispatch } = usePantry();
   const { ask } = useAssistant();
-  const busy = state.mode === 'thinking';
+  const [planning, setPlanning] = useState(false);
+  const busy = state.mode === 'thinking' || planning;
   const [top, ...alternatives] = state.meals;
   const occasion = top?.occasion ?? currentOccasion();
+
+  async function replan() {
+    if (!HAS_SERVER) {
+      void ask(`Suggest different ${currentOccasion()} ideas with what I have`);
+      return;
+    }
+    setPlanning(true);
+    try {
+      dispatch({ type: 'sync_state', state: await api.plan(currentOccasion()) });
+    } catch (err) {
+      console.error('Could not plan meals', err);
+    } finally {
+      setPlanning(false);
+    }
+  }
+
+  // A saved plan from earlier (or for another meal, like lunch ideas at 6 pm) is replaced with a
+  // fresh one for the meal due now, once the pantry has loaded.
+  const refreshedFor = useRef<string | null>(null);
+  const loaded = state.inventory.length > 0;
+  useEffect(() => {
+    const due = currentOccasion();
+    if (!HAS_SERVER || !loaded || refreshedFor.current === due) return;
+    if (state.meals[0]?.occasion === due) return;
+    refreshedFor.current = due;
+    void replan();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, state.meals]);
 
   return (
     <section className="card card--meal" aria-labelledby="meal-title">
@@ -20,9 +51,9 @@ export function MealPlanCard() {
           {planTitle(occasion)}
         </h2>
         {top && (
-          <button type="button" className="link-btn" onClick={() => void ask(`Suggest different ${occasion} ideas with what I have`)} disabled={busy}>
-            <RefreshCw size={14} />
-            Re-plan
+          <button type="button" className="link-btn" onClick={() => void replan()} disabled={busy}>
+            <RefreshCw size={14} className={planning ? 'spin' : undefined} />
+            {planning ? 'Planning…' : 'Re-plan'}
           </button>
         )}
       </header>

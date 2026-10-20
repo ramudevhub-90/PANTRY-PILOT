@@ -255,4 +255,5 @@ export const api = {
   clearChecked: () => post('/api/grocery', { clearChecked: true }),
   cancelTimer: (id: string) => post('/api/timers/cancel', { id }),
   setPreferences: (prefs: Partial<FoodPreferences>) => post('/api/preferences', prefs),
+  plan: (meal?: string, request?: string) => post('/api/plan', { meal, request }),
 };

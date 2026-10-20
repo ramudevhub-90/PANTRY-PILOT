@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable
 from datetime import date, timedelta
@@ -18,6 +19,8 @@ from .models import Category, Diet, GroceryItem, Household, KitchenTimer, Pantry
 from .nova import Nova, parse_data_url
 from .recipes import RECIPES, plan_meals
 from .store import Store
+
+log = logging.getLogger(__name__)
 
 INSTRUCTIONS = """Pantry Pilot keeps track of a household's food: what's in stock, what expires soon,
 what to cook, the grocery list and kitchen timers.
@@ -246,12 +249,17 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
         avoid = [m.name for m in household.meals]
         prefs = household.preferences
         zone = str(local_now().tzinfo)
-        system, text = suggest_request(household.inventory, occasion, count, request, avoid, prefs, zone)
+        # Ask for spares: Nova sometimes repeats a dish or picks one the diet rules out.
+        system, text = suggest_request(household.inventory, occasion, count + 3, request, avoid, prefs, zone)
         try:
             raw = await anyio.to_thread.run_sync(nova.suggest_meals, system, text)
-            meals = to_meals(raw, household.inventory, count, prefs)
+            meals = to_meals(raw, household.inventory, count, prefs, exclude=avoid)
         except Exception:
+            log.warning("Nova meal ideas failed; using the built-in recipes", exc_info=True)
             meals = []
+        else:
+            if not meals:
+                log.warning("Nova returned no usable meal ideas (%d raw)", len(raw))
         source = "Amazon Nova"
         if not meals:
             meals = [m for m in plan_meals(household.inventory, limit=len(RECIPES)) if suits(m, prefs)][:count]
@@ -346,5 +354,24 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
         )
         save(household)
         return {"summary": f"{label} · {seconds // 60:02d}:{seconds % 60:02d}", "label": label, "seconds": seconds}
+
+    @mcp.tool(title="Stop a kitchen timer")
+    def cancel_timer(label: str | None = None) -> dict[str, Any]:
+        """Stop running kitchen timers. Pass the timer's label ("rice") to stop just that one;
+        without a label every running timer stops. Returns what was stopped and what still runs."""
+        household = load()
+        now_ms = int(time.time() * 1000)
+        running = [t for t in household.timers if t.ends_at > now_ms]
+        key = (label or "").strip().lower()
+        stopped = [t for t in running if not key or key in t.label.lower() or t.label.lower() in key]
+        household.timers = [t for t in running if t not in stopped]
+        save(household)
+        names = [t.label for t in stopped]
+        left = [t.label for t in household.timers]
+        if names:
+            summary = "Stopped " + _join(names)
+        else:
+            summary = "No timer matched" if running else "No timers were running"
+        return {"summary": summary, "stopped": names, "still_running": left}
 
     return mcp

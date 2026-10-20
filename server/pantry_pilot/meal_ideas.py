@@ -12,13 +12,41 @@ from typing import Any
 
 from .models import FoodPreferences, Meal, MealTimer, PantryItem
 
-SUGGEST_PROMPT = """You are a home cook planning {occasion} from this household's pantry.
-Suggest {count} different dishes that suit {occasion} and are commonly cooked at home where the
-household lives (their time zone is {zone}), unless they prefer other cuisines. Strictly follow their
-diet and never use ingredients they avoid. Use up food that expires soonest first, prefer dishes that
-need nothing or very little that isn't in the pantry, and assume basic staples (salt, water, cooking
-oil, common spices for the cuisine) are available. Keep steps short and practical: 3 to 6 steps.
+SUGGEST_PROMPT = """You are a home cook in {place} planning {occasion} from this household's pantry.
+Suggest {count} different dishes that people in {place} really cook at home for {occasion}{cuisine_note}.
+{occasion_note}
+Strictly follow the household's diet and never use ingredients they avoid. Use up food that expires
+soonest first; it is fine to need one or two cheap extra ingredients. Assume basic staples (salt,
+water, cooking oil, common spices for the cuisine) are available. Never repeat a dish already
+suggested. Give 3 to 6 short steps, one sentence each.
 Report the dishes with the suggest_meals tool."""
+
+OCCASION_NOTES = {
+    "breakfast": "Breakfast dishes only, not lunch or dinner food.",
+    "brunch": "Something filling but light, between breakfast and lunch.",
+    "lunch": "A proper lunch.",
+    "evening snacks": "Light tea-time snacks, not full meals: think finger food or small plates.",
+    "dinner": "A proper dinner.",
+    "late-night snack": "Quick, light bites that take under 15 minutes.",
+}
+
+# Time zones for the countries we mostly serve; others go to Nova as the zone name, which it can place.
+_PLACES = {
+    "Asia/Kolkata": "India",
+    "Asia/Calcutta": "India",
+    "Asia/Dubai": "the UAE",
+    "Asia/Singapore": "Singapore",
+    "Europe/London": "the UK",
+}
+
+
+def place_for(zone: str) -> str:
+    if zone in _PLACES:
+        return _PLACES[zone]
+    if zone.startswith(("America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Phoenix")):
+        return "the United States"
+    return f"the region of time zone {zone}"
+
 
 DIET_RULES = {
     "vegetarian": "vegetarian: no meat, poultry, fish or eggs (dairy is fine)",
@@ -97,7 +125,17 @@ def suggest_request(
         text += f"\n\nThe user asked for: {wish}"
     if avoid:
         text += "\n\nAlready suggested, so pick different dishes: " + ", ".join(avoid)
-    return SUGGEST_PROMPT.format(occasion=occasion, count=count, zone=zone), text
+    cuisine_note = (
+        f", in these cuisines: {', '.join(preferences.cuisines)}" if preferences.cuisines else ", in the local home-style cuisine"
+    )
+    system = SUGGEST_PROMPT.format(
+        place=place_for(zone),
+        occasion=occasion,
+        count=count,
+        cuisine_note=cuisine_note,
+        occasion_note=OCCASION_NOTES.get(occasion, ""),
+    )
+    return system, text
 
 
 def avoided(name: str, preferences: FoodPreferences) -> bool:
@@ -124,13 +162,17 @@ def _pantry_item(inventory: list[PantryItem], name: str) -> PantryItem | None:
 
 
 def to_meals(
-    raw: list[dict[str, Any]], inventory: list[PantryItem], limit: int, preferences: FoodPreferences | None = None
+    raw: list[dict[str, Any]],
+    inventory: list[PantryItem],
+    limit: int,
+    preferences: FoodPreferences | None = None,
+    exclude: list[str] | None = None,
 ) -> list[Meal]:
     """Nova's dishes as Meals, with `uses` and `rescues` checked against the real pantry. Dishes
-    that use an ingredient the household avoids are dropped."""
+    that use an ingredient the household avoids, or were already suggested (`exclude`), are dropped."""
     preferences = preferences or FoodPreferences()
     meals: list[Meal] = []
-    seen: set[str] = set()
+    seen: set[str] = {_slug(n) for n in exclude or []}
     for dish in raw:
         name = str(dish.get("name", "")).strip()
         steps = [str(s).strip() for s in dish.get("steps") or [] if str(s).strip()][:6]

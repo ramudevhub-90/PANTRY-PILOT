@@ -41,6 +41,7 @@ def test_lists_all_tools_with_read_only_hints(store):
         "build_grocery_list": False,
         "get_grocery_list": True,
         "set_timer": False,
+        "cancel_timer": False,
     }
 
 

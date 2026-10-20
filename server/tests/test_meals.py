@@ -134,7 +134,7 @@ def test_preferences_are_saved_and_sent_to_nova():
     nova = IdeasNova([[{**POHA, "name": "Mushroom Poha"}, POHA]])
     result = plan(store, nova, {"meal": "breakfast"}, zone="Asia/Kolkata")
     system, request = nova.requests[0]
-    assert "Asia/Kolkata" in system
+    assert "in India" in system
     assert "no meat, poultry, fish or eggs" in request and "Never use: mushroom" in request
     assert [m["name"] for m in result["meals"]] == ["Poha"]  # the mushroom dish is dropped
 
@@ -144,3 +144,22 @@ def test_recipe_fallback_respects_diet():
     call_tool(store, "set_food_preferences", {"diet": "vegetarian"})
     names = [m["name"] for m in plan(store, MockNova(), {"meal": "dinner"})["meals"]]
     assert names and not any("Chicken" in n or "Frittata" in n or "Fried Rice" in n for n in names)
+
+
+def test_replanning_drops_repeated_dishes_even_if_nova_repeats_them():
+    store = MemoryStore()
+    nova = IdeasNova([[UPMA], [UPMA, POHA]])
+    plan(store, nova, {"meal": "breakfast"})
+    second = plan(store, nova, {"meal": "breakfast"})
+    assert [m["name"] for m in second["meals"]] == ["Poha"]
+
+
+def test_cancel_timer_stops_by_label_or_all():
+    store = MemoryStore()
+    call_tool(store, "set_timer", {"label": "rice", "minutes": 15})
+    call_tool(store, "set_timer", {"label": "dal", "minutes": 20})
+    one = call_tool(store, "cancel_timer", {"label": "rice"})
+    assert one["stopped"] == ["rice"] and one["still_running"] == ["dal"]
+    rest = call_tool(store, "cancel_timer", {})
+    assert rest["stopped"] == ["dal"] and store.load("test").timers == []
+    assert call_tool(store, "cancel_timer", {})["summary"] == "No timers were running"
