@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import urllib.parse
@@ -63,6 +64,10 @@ class OriginSecretMiddleware:
                 return
         await self.app(scope, receive, send)
 
+
+log = logging.getLogger(__name__)
+# Lambda shows whatever reaches stderr; uvicorn only sets up its own loggers.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 
 CHAT_KEEP_SECONDS = 30 * 60
 """A conversation older than this starts fresh."""
@@ -368,6 +373,13 @@ def create_app(
 
         return await connector_action(request, start)
 
+    async def record_tools(user: str, provider: connectors.Provider) -> None:
+        """Note the app's tool names after connecting (for ordering); never blocks the sign-in."""
+        try:
+            await connectors.tool_catalog(store, user, provider, connector_client)
+        except Exception:
+            log.warning("Couldn't list %s tools", provider.name, exc_info=True)
+
     @mcp.custom_route("/api/connectors/{provider}/callback", methods=["GET"])
     async def connector_callback(request: Request) -> Response:
         """Where Swiggy (and any app that allows our address) returns the browser after sign-in.
@@ -380,9 +392,10 @@ def create_app(
             message = f"{provider.name} sign-in was cancelled ({reason})."
             return RedirectResponse("/?connectError=" + urllib.parse.quote(message), status_code=303)
         try:
-            await anyio.to_thread.run_sync(connectors.finish_from_redirect, store, provider, str(request.url))
+            user = await anyio.to_thread.run_sync(connectors.finish_from_redirect, store, provider, str(request.url))
         except connectors.ConnectorError as err:
             return RedirectResponse("/?connectError=" + urllib.parse.quote(str(err)), status_code=303)
+        await record_tools(user, provider)
         return RedirectResponse(f"/?connected={provider.id}", status_code=303)
 
     @mcp.custom_route("/api/connectors/{provider}/finish", methods=["POST"])
@@ -391,6 +404,7 @@ def create_app(
 
         async def finish(p: connectors.Provider) -> None:
             await anyio.to_thread.run_sync(connectors.finish_sign_in, store, user, p, url)
+            await record_tools(user, p)
 
         return await connector_action(request, finish)
 
@@ -398,6 +412,7 @@ def create_app(
     async def sync_connector(request: Request) -> Response:
         async def sync(p: connectors.Provider) -> dict[str, Any]:
             result = await import_orders(p.id)
+            await record_tools(household_id_now(), p)
             return {"sync": result, "state": json.loads(dumps_for_api(store.load(household_id_now())))}
 
         return await connector_action(request, sync)

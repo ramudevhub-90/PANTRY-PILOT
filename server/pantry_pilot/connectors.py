@@ -19,6 +19,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import logging
 import secrets
 import time
 import urllib.error
@@ -37,6 +38,8 @@ from .nova import Nova, OrderRead
 from .store import Store
 
 REDIRECT_URI = "http://localhost/callback"
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -57,7 +60,13 @@ PROVIDERS: dict[str, Provider] = {
         id="zepto",
         name="Zepto",
         mcp_url="https://mcp.zepto.co.in/mcp",
-        scope="tools:read",  # read-only grant: Zepto itself refuses cart, order and payment calls
+        # Cart and checkout too, so Alexa can order (only after the user confirms; see ordering.py).
+        scope=" ".join([
+            "tools:read", "tools:write",
+            "dev.ucp.shopping.catalog.search:read", "dev.ucp.shopping.catalog.lookup:read",
+            "dev.ucp.common.location.search:read", "dev.ucp.common.location.lookup:read",
+            "dev.ucp.shopping.cart:manage", "dev.ucp.shopping.checkout:manage", "dev.ucp.shopping.order:manage",
+        ]),
         read_tools=frozenset({"list_order_history", "get_order_detail", "get_past_order_items"}),
         # Zepto rejects any redirect not on its allowlist (invalid_redirect_uri) until it approves ours.
     ),
@@ -83,8 +92,14 @@ class ConnectorError(Exception):
 
 # ---------- storage keys ----------
 
+_FIRST_SCOPES = {"zepto": "tools:read", "swiggy": "mcp:tools"}
+"""Scopes the first clients were registered with; a client registered for other scopes gets its own key."""
+
+
 def _client_key(provider: Provider, redirect_uri: str) -> str:
     suffix = "" if redirect_uri == REDIRECT_URI else "#" + hashlib.sha256(redirect_uri.encode()).hexdigest()[:12]
+    if provider.scope and provider.scope != _FIRST_SCOPES.get(provider.id):
+        suffix += "#scope-" + hashlib.sha256(provider.scope.encode()).hexdigest()[:8]
     return f"oauth-client#{provider.id}{suffix}"
 
 
@@ -350,6 +365,31 @@ async def _call(client: Client, provider: Provider, tool: str, args: dict[str, A
     if result.is_error:
         raise ConnectorError(f"{provider.name} returned an error: {text[:200] or tool}")
     return text or json.dumps(result.structured_content)
+
+
+async def tool_catalog(
+    store: Store, user: str, provider: Provider, client_factory: ClientFactory = remote_client
+) -> list[dict[str, Any]]:
+    """The provider's tools (name, description, argument names): no user data. Logged and kept, so
+    ordering can be built on the real tool names."""
+    token = await anyio.to_thread.run_sync(access_token, store, user, provider)
+    try:
+        async with client_factory(provider, token) as client:
+            listed = await client.list_tools()
+    except BaseExceptionGroup as group:
+        raise _first_error(group) from None
+    catalog = [
+        {
+            "name": t.name,
+            "description": (t.description or "")[:300],
+            "args": sorted((t.input_schema or {}).get("properties", {})),
+            "required": (t.input_schema or {}).get("required", []),
+        }
+        for t in listed.tools
+    ]
+    store.save_record(f"tool-catalog#{provider.id}", {"tools": catalog, "at": time.time()})
+    log.info("%s MCP tools: %s", provider.name, json.dumps(catalog))
+    return catalog
 
 
 def _first_error(exc: BaseException) -> BaseException:

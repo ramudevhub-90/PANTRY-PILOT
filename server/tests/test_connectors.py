@@ -139,7 +139,8 @@ def test_sign_in_uses_pkce_and_finishes_from_the_pasted_address(fake_oauth):
     query = dict(urllib.parse.parse_qsl(url.query))
     assert url.netloc == "auth.example"
     assert query["client_id"] == "pp-client" and query["redirect_uri"] == "http://localhost/callback"
-    assert query["code_challenge_method"] == "S256" and query["scope"] == "tools:read"
+    assert query["code_challenge_method"] == "S256"
+    assert {"tools:read", "dev.ucp.shopping.cart:manage", "dev.ucp.shopping.checkout:manage"} <= set(query["scope"].split())
     assert query["resource"] == "https://mcp.zepto.co.in/mcp"
 
     with pytest.raises(connectors.ConnectorError):
@@ -235,3 +236,31 @@ def app_mcp_server(store, factory):
     """The MCP server inside create_app, reached through its streamable HTTP app's route."""
     app = create_app(store, MockNova(), "demo", connector_client=factory)
     return app.state.mcp
+
+
+def test_tool_catalog_lists_names_without_user_data(fake_oauth):
+    store = MemoryStore()
+    url = urllib.parse.urlparse(connectors.start_sign_in(store, "alice", ZEPTO))
+    state = dict(urllib.parse.parse_qsl(url.query))["state"]
+    connectors.finish_sign_in(store, "alice", ZEPTO, f"http://localhost/callback?code=c&state={state}")
+
+    class Tool:
+        def __init__(self, name, props):
+            self.name, self.description = name, f"{name} tool"
+            self.input_schema = {"type": "object", "properties": {p: {} for p in props}, "required": props[:1]}
+
+    class Listed:
+        tools = [Tool("search_catalog", ["query"]), Tool("update_cart", ["items", "cart_id"])]
+
+    class FakeClient:
+        async def list_tools(self):
+            return Listed()
+
+    @contextlib.asynccontextmanager
+    async def factory(provider, token):
+        yield FakeClient()
+
+    catalog = anyio.run(connectors.tool_catalog, store, "alice", ZEPTO, factory)
+    assert [t["name"] for t in catalog] == ["search_catalog", "update_cart"]
+    assert catalog[1]["args"] == ["cart_id", "items"] and catalog[1]["required"] == ["items"]
+    assert store.load_record("tool-catalog#zepto")["tools"] == catalog
