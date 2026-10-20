@@ -107,12 +107,20 @@ class FoodPreferences(ApiModel):
     """City and region, e.g. "Bengaluru, Karnataka, India". Empty: the country from the time zone."""
 
 
+class Notifications(ApiModel):
+    """Where order updates go besides email."""
+
+    whatsapp: str = ""
+    """The household's WhatsApp number in E.164 (+919876543210); empty means email only."""
+
+
 class Household(ApiModel):
     inventory: list[PantryItem] = Field(default_factory=list)
     grocery: list[GroceryItem] = Field(default_factory=list)
     timers: list[KitchenTimer] = Field(default_factory=list)
     meals: list[Meal] = Field(default_factory=list)
     preferences: FoodPreferences = Field(default_factory=FoodPreferences)
+    notifications: Notifications = Field(default_factory=Notifications)
 
 
 _SEED: list[tuple[str, str, float, str, Category, int]] = [

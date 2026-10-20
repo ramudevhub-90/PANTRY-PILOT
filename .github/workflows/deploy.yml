@@ -102,11 +102,13 @@ jobs:
           DOMAIN: ${{ vars.DOMAIN || 'trypantrypilot.com' }}
           SES_ROLE_ARN: ${{ vars.SES_ROLE_ARN || 'arn:aws:iam::975138397215:role/PantryPilotSesSender' }}
           NOVA_ROLE_ARN: ${{ vars.NOVA_ROLE_ARN || 'arn:aws:iam::234951664889:role/PantryPilotBedrockAccess' }}
+          WHATSAPP_PHONE_ID: ${{ vars.WHATSAPP_PHONE_ID || 'phone-number-id-3903c68c6bc24fc09bde596f9ebf8aaa' }}
         run: |
           args=()
           [ -n "$DOMAIN" ] && args+=(-c "domain=$DOMAIN")
           [ -n "$SES_ROLE_ARN" ] && args+=(-c "sesRole=$SES_ROLE_ARN")
           [ -n "$NOVA_ROLE_ARN" ] && args+=(-c "novaRole=$NOVA_ROLE_ARN")
+          [ -n "$WHATSAPP_PHONE_ID" ] && args+=(-c "whatsappPhone=$WHATSAPP_PHONE_ID")
           npm run deploy -- "${args[@]}"
 
       - name: Remove origin secret

@@ -18,6 +18,8 @@ const domainName: string | undefined = app.node.tryGetContext('domain') || undef
 // Email-code sign-in, sending through SES in another account: -c sesRole=arn:aws:iam::<account>:role/<name>
 const sesRoleArn: string | undefined = app.node.tryGetContext('sesRole') || undefined;
 // Instacart Developer Platform keys: development until Instacart approves production (-c instacart=production).
+// WhatsApp order updates: -c whatsappPhone=phone-number-id-…
+const whatsappPhoneId: string | undefined = app.node.tryGetContext('whatsappPhone') || undefined;
 const instacartEnv = app.node.tryGetContext('instacart') === 'production' ? 'production' : 'development';
 
 new PantryPilotStack(app, 'PantryPilot', {
@@ -29,4 +31,5 @@ new PantryPilotStack(app, 'PantryPilot', {
   domainName,
   sesRoleArn,
   instacartEnv,
+  whatsappPhoneId,
 });

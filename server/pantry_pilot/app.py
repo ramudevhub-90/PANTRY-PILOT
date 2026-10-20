@@ -40,7 +40,7 @@ from .instacart import Instacart, InstacartError, instacart_from_env
 from .kroger import CART_URL, Kroger, KrogerError, kroger_from_env
 from .mcp_server import CONFIDENT, create_server
 from .mealtime import TimezoneMiddleware
-from .notify import Message, Notifier, NotifyUnavailable
+from .notify import WHATSAPP_TEMPLATES, Message, Notifier, NotifyUnavailable, normalise_whatsapp
 from .models import GroceryItem
 from .nova import BedrockNova, Nova, NovaUnavailable, nova_from_env
 from .store import Store, dumps_for_api, store_from_env
@@ -318,6 +318,26 @@ def create_app(
         except NotifyUnavailable as err:
             return JSONResponse({"error": str(err)}, status_code=503)
         return JSONResponse({"sentTo": address})
+
+    @mcp.custom_route("/api/notify/whatsapp", methods=["POST"])
+    async def set_whatsapp(request: Request) -> Response:
+        """{number}: send order updates to this WhatsApp number too (a confirmation goes there
+        first); an empty number turns WhatsApp updates off."""
+        raw = str((await request.json()).get("number", "")).strip()
+        hid = household_id_now()
+        try:
+            number = normalise_whatsapp(raw) if raw else ""
+        except ValueError as err:
+            return JSONResponse({"error": str(err)}, status_code=400)
+        if number:
+            try:
+                await anyio.to_thread.run_sync(notifier.whatsapp, number, WHATSAPP_TEMPLATES["updates_on"], ["there"])
+            except NotifyUnavailable as err:
+                return JSONResponse({"error": str(err)}, status_code=503)
+        household = store.load(hid)
+        household.notifications.whatsapp = number
+        store.save(hid, household)
+        return state_response()
 
     @mcp.custom_route("/api/preferences", methods=["POST"])
     async def set_preferences(request: Request) -> Response:

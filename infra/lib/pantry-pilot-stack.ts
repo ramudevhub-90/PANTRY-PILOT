@@ -27,6 +27,8 @@ export interface PantryPilotStackProps extends cdk.StackProps {
    * https://<domain> and the domain is verified for sending email with Amazon SES.
    */
   domainName?: string;
+  /** AWS End User Messaging Social phone number id (phone-number-id-…) that sends WhatsApp updates. */
+  whatsappPhoneId?: string;
   /**
    * Email-code sign-in (Cognito custom authentication). Codes are sent from no-reply@<domain> by our
    * own Lambda through SES in the account owning `sesRoleArn`: a role there that allows
@@ -265,6 +267,16 @@ export class PantryPilotStack extends cdk.Stack {
     if (notify) {
       notify.grantInvoke(server);
       server.addEnvironment('NOTIFY_FUNCTION', notify.functionName);
+    }
+    // WhatsApp order updates through AWS End User Messaging Social (number linked in the console).
+    if (props.whatsappPhoneId) {
+      server.addEnvironment('WHATSAPP_PHONE_ID', props.whatsappPhoneId);
+      server.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['social-messaging:SendWhatsAppMessage'],
+          resources: [`arn:aws:social-messaging:${this.region}:${this.account}:phone-number-id/*`],
+        }),
+      );
     }
     // Spoken replies: Amazon Polly reads the assistant's answers aloud (phones play this reliably).
     server.addToRolePolicy(new iam.PolicyStatement({ actions: ['polly:SynthesizeSpeech'], resources: ['*'] }));

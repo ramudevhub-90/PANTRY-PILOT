@@ -23,3 +23,21 @@ def test_test_email_reports_when_email_is_not_set_up():
     with TestClient(create_app(MemoryStore(), MockNova(), "alice", notifier=notifier)) as client:
         response = client.post("/api/notify/test")
     assert response.status_code == 503
+
+
+def test_whatsapp_number_is_normalised_confirmed_and_saved():
+    from pantry_pilot.notify import normalise_whatsapp
+
+    assert normalise_whatsapp("98765 43210") == "+919876543210"
+    assert normalise_whatsapp("0091 98765-43210") == "+919876543210"
+    sent = []
+    notifier = Notifier(email_of=lambda u: None, send_email=lambda p: None, send_whatsapp=lambda *a: sent.append(a))
+    store = MemoryStore()
+    with TestClient(create_app(store, MockNova(), "alice", notifier=notifier)) as client:
+        bad = client.post("/api/notify/whatsapp", json={"number": "12"})
+        ok = client.post("/api/notify/whatsapp", json={"number": "+91 98765 43210"})
+        off = client.post("/api/notify/whatsapp", json={"number": ""})
+    assert bad.status_code == 400
+    assert ok.json()["notifications"]["whatsapp"] == "+919876543210"
+    assert sent == [("+919876543210", "pantry_pilot_updates_on", ["there"])]
+    assert off.json()["notifications"]["whatsapp"] == ""

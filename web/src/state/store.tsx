@@ -21,6 +21,7 @@ export interface PantryState {
   grocery: GroceryItem[];
   timers: KitchenTimer[];
   preferences: FoodPreferences;
+  notifications: { whatsapp: string };
   messages: ChatMessage[];
   mode: AssistantMode;
   voiceReplies: boolean;
@@ -60,6 +61,7 @@ function initialState(): PantryState {
     grocery: [],
     timers: [],
     preferences: { diet: 'any', cuisines: [], avoid: [], location: '' },
+    notifications: { whatsapp: '' },
     messages: [],
     mode: 'idle',
     voiceReplies: true,
@@ -89,6 +91,7 @@ function reducer(state: PantryState, action: Action): PantryState {
         ...state,
         ...action.state,
         preferences: action.state.preferences ?? state.preferences,
+        notifications: action.state.notifications ?? state.notifications,
         highlight: state.inventory.length ? changed : [],
       };
     }

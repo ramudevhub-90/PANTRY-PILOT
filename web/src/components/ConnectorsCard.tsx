@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ClipboardPaste, ExternalLink, Link2, Mail, RefreshCw, ShoppingBag, Unlink } from 'lucide-react';
+import { ClipboardPaste, ExternalLink, Link2, Mail, MessageCircle, RefreshCw, ShoppingBag, Unlink } from 'lucide-react';
 import { api, type Connector, type KrogerStatus } from '../agent/remote';
 import { availableHere } from '../lib/region';
 import { usePantry } from '../state/store';
@@ -27,7 +27,9 @@ function ago(epochSeconds: number | null): string {
 
 /** Swiggy Instamart and Zepto: connect once, then import delivered orders into the pantry. */
 export function ConnectorsCard() {
-  const { dispatch } = usePantry();
+  const { state, dispatch } = usePantry();
+  const [whatsapp, setWhatsapp] = useState('');
+  const [editingWhatsapp, setEditingWhatsapp] = useState(false);
   const [connectors, setConnectors] = useState<Connector[] | null>(null);
   const [connecting, setConnecting] = useState<Connector['id'] | null>(null);
   const [pasted, setPasted] = useState('');
@@ -282,9 +284,56 @@ export function ConnectorsCard() {
 
       {message && <p className={message.tone === 'ok' ? 'auth-notice' : 'auth-error'}>{message.text}</p>}
 
+      <div className="apps__whatsapp">
+        <MessageCircle size={15} aria-hidden="true" />
+        {state.notifications.whatsapp && !editingWhatsapp ? (
+          <>
+            <span>
+              WhatsApp updates to <strong>{state.notifications.whatsapp}</strong>
+            </span>
+            <button type="button" className="link-btn" onClick={() => setEditingWhatsapp(true)}>
+              Change
+            </button>
+            <button
+              type="button"
+              className="link-btn"
+              disabled={busy !== null}
+              onClick={() => act('whatsapp-off', async () => dispatch({ type: 'sync_state', state: await api.setWhatsapp('') }))}
+            >
+              Turn off
+            </button>
+          </>
+        ) : (
+          <form
+            className="apps__whatsapp-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void act('whatsapp', async () => {
+                dispatch({ type: 'sync_state', state: await api.setWhatsapp(whatsapp) });
+                setEditingWhatsapp(false);
+                setMessage({ tone: 'ok', text: 'WhatsApp updates are on. Check WhatsApp for a confirmation message.' });
+              });
+            }}
+          >
+            <input
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              value={whatsapp}
+              onChange={(e) => setWhatsapp(e.target.value)}
+              placeholder="WhatsApp number, e.g. +91 98765 43210"
+              aria-label="WhatsApp number for order updates"
+            />
+            <button type="submit" className="btn btn--sm" disabled={!whatsapp.trim() || busy !== null}>
+              {busy === 'whatsapp' ? 'Saving…' : 'Get updates'}
+            </button>
+          </form>
+        )}
+      </div>
+
       <p className="apps__notify muted small-print">
         <Mail size={13} aria-hidden="true" />
-        Order summaries and payment links come by email.
+        Order summaries and payment links also come by email.
         <button
           type="button"
           className="link-btn"

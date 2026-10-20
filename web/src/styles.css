@@ -2621,3 +2621,41 @@ p {
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
+
+.apps__whatsapp {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 14px;
+}
+
+.apps__whatsapp > svg {
+  color: #25d366;
+}
+
+.apps__whatsapp-form {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.apps__whatsapp-form input {
+  flex: 1 1 200px;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
