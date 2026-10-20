@@ -2611,3 +2611,13 @@ p {
     font-size: 11px;
   }
 }
+
+.apps__notify {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}

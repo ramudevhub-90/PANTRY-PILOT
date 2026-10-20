@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ClipboardPaste, ExternalLink, Link2, RefreshCw, ShoppingBag, Unlink } from 'lucide-react';
+import { ClipboardPaste, ExternalLink, Link2, Mail, RefreshCw, ShoppingBag, Unlink } from 'lucide-react';
 import { api, type Connector, type KrogerStatus } from '../agent/remote';
 import { availableHere } from '../lib/region';
 import { usePantry } from '../state/store';
@@ -139,7 +139,7 @@ export function ConnectorsCard() {
         </h2>
       </header>
       <p className="muted small-print">
-        Import delivered orders straight into your pantry, or fill a cart from your grocery list. Pantry Pilot never orders or pays.
+        Import delivered orders into your pantry and compare prices. Orders are placed only after you say “place the order”.
       </p>
 
       {connectors === null ? (
@@ -281,6 +281,24 @@ export function ConnectorsCard() {
       )}
 
       {message && <p className={message.tone === 'ok' ? 'auth-notice' : 'auth-error'}>{message.text}</p>}
+
+      <p className="apps__notify muted small-print">
+        <Mail size={13} aria-hidden="true" />
+        Order summaries and payment links come by email.
+        <button
+          type="button"
+          className="link-btn"
+          disabled={busy !== null}
+          onClick={() =>
+            act('test-email', async () => {
+              const to = await api.testEmail();
+              setMessage({ tone: 'ok', text: `Sent a test email to ${to}.` });
+            })
+          }
+        >
+          {busy === 'test-email' ? 'Sending…' : 'Send a test'}
+        </button>
+      </p>
     </section>
   );
 }

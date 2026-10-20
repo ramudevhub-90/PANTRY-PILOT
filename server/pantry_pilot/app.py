@@ -40,6 +40,7 @@ from .instacart import Instacart, InstacartError, instacart_from_env
 from .kroger import CART_URL, Kroger, KrogerError, kroger_from_env
 from .mcp_server import CONFIDENT, create_server
 from .mealtime import TimezoneMiddleware
+from .notify import Message, Notifier, NotifyUnavailable
 from .models import GroceryItem
 from .nova import BedrockNova, Nova, NovaUnavailable, nova_from_env
 from .store import Store, dumps_for_api, store_from_env
@@ -84,6 +85,7 @@ def create_app(
     instacart: Instacart | None = None,
     kroger: Kroger | None = None,
     speaker: voice.Speaker | None = None,
+    notifier: Notifier | None = None,
 ) -> Starlette:
     """`household_id` is the pantry used when nobody is signed in (local development without
     Cognito). With Cognito configured, each signed-in user gets their own pantry."""
@@ -92,6 +94,7 @@ def create_app(
     instacart = instacart or instacart_from_env()
     kroger = kroger or kroger_from_env()
     speaker = speaker or voice.Speaker()
+    notifier = notifier or Notifier()
     default_household = household_id or os.environ.get("HOUSEHOLD_ID", "demo")
     auth = auth or AuthConfig.from_env()
 
@@ -298,6 +301,23 @@ def create_app(
         if result.is_error:
             return JSONResponse({"error": "Couldn't plan meals right now"}, status_code=400)
         return state_response()
+
+    @mcp.custom_route("/api/notify/test", methods=["POST"])
+    async def notify_test(_: Request) -> Response:
+        """Send the signed-in user a sample order email, to check notifications reach them."""
+        message = Message(
+            subject="Order updates from Pantry Pilot",
+            heading="Order updates will arrive here",
+            intro="When Alexa places an order or needs you to pay, the summary and payment link come to this inbox.",
+            items=[{"name": "Milk 1 L", "quantity": "2", "price": "₹68"}, {"name": "Onions 1 kg", "price": "₹42"}],
+            total="₹110 (sample)",
+            footer="This is a test. No order was placed.",
+        )
+        try:
+            address = await anyio.to_thread.run_sync(notifier.email, household_id_now(), message)
+        except NotifyUnavailable as err:
+            return JSONResponse({"error": str(err)}, status_code=503)
+        return JSONResponse({"sentTo": address})
 
     @mcp.custom_route("/api/preferences", methods=["POST"])
     async def set_preferences(request: Request) -> Response:

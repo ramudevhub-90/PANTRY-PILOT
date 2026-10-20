@@ -258,4 +258,11 @@ export const api = {
   cancelTimer: (id: string) => post('/api/timers/cancel', { id }),
   setPreferences: (prefs: Partial<FoodPreferences>) => post('/api/preferences', prefs),
   plan: (meal?: string, request?: string) => post('/api/plan', { meal, request }),
+  /** Email the signed-in user a sample order update; returns the address it went to. */
+  testEmail: async (): Promise<string> => {
+    const response = await apiFetch('/api/notify/test', { method: 'POST' });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? `Server error ${response.status}`);
+    return body.sentTo;
+  },
 };

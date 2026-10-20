@@ -99,6 +99,7 @@ export class PantryPilotStack extends cdk.Stack {
       });
     users.addTrigger(cognito.UserPoolOperation.CUSTOM_MESSAGE, trigger('EmailTemplates', 'custom-message.handler'));
 
+    let notify: lambda.Function | undefined;
     if (emailCodes) {
       const senderRole = new iam.Role(this, 'OtpSenderRole', {
         roleName: OTP_SENDER_ROLE_NAME,
@@ -115,6 +116,12 @@ export class PantryPilotStack extends cdk.Stack {
         }),
       );
       users.addTrigger(cognito.UserPoolOperation.VERIFY_AUTH_CHALLENGE_RESPONSE, trigger('VerifyChallenge', 'verify-challenge.handler'));
+      // Order emails (summary, payment link) go out the same way, with the same send-only role.
+      notify = trigger('Notify', 'notify.handler', {
+        role: senderRole,
+        timeout: cdk.Duration.seconds(15),
+        environment: { SES_ROLE_ARN: props.sesRoleArn!, SES_REGION: this.region, FROM_ADDRESS: `no-reply@${domainName}` },
+      });
     }
 
     const loginDomain = users.addDomain('Login', {
@@ -253,6 +260,12 @@ export class PantryPilotStack extends cdk.Stack {
     server.addToRolePolicy(
       new iam.PolicyStatement({ actions: ['transcribe:StartStreamTranscriptionWebSocket'], resources: ['*'] }),
     );
+    // Order notifications: find the signed-in user's email, then email through the Notify function.
+    server.addToRolePolicy(new iam.PolicyStatement({ actions: ['cognito-idp:ListUsers'], resources: [users.userPoolArn] }));
+    if (notify) {
+      notify.grantInvoke(server);
+      server.addEnvironment('NOTIFY_FUNCTION', notify.functionName);
+    }
     // Spoken replies: Amazon Polly reads the assistant's answers aloud (phones play this reliably).
     server.addToRolePolicy(new iam.PolicyStatement({ actions: ['polly:SynthesizeSpeech'], resources: ['*'] }));
 
