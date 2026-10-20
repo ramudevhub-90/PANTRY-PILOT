@@ -4,6 +4,7 @@ import { HAS_SERVER, api } from '../agent/remote';
 import { useAssistant } from '../agent/useAssistant';
 import { FoodPreferences } from './FoodPreferences';
 import { joinNames, lower } from '../lib/format';
+import { useNow } from '../hooks/useNow';
 import { currentOccasion, planTitle } from '../lib/mealtime';
 import { usePantry } from '../state/store';
 
@@ -30,18 +31,18 @@ export function MealPlanCard() {
     }
   }
 
-  // A saved plan from earlier (or for another meal, like lunch ideas at 6 pm) is replaced with a
-  // fresh one for the meal due now, once the pantry has loaded.
+  // Every visit gets a fresh plan for the meal due now (a saved one may be hours old or for another
+  // meal), once the pantry has loaded; and again if the meal changes while the page stays open.
   const refreshedFor = useRef<string | null>(null);
   const loaded = state.inventory.length > 0;
+  const now = useNow(true, 60_000);
   useEffect(() => {
-    const due = currentOccasion();
+    const due = currentOccasion(new Date(now));
     if (!HAS_SERVER || !loaded || refreshedFor.current === due) return;
-    if (state.meals[0]?.occasion === due) return;
     refreshedFor.current = due;
     void replan();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, state.meals]);
+  }, [loaded, now]);
 
   return (
     <section className="card card--meal" aria-labelledby="meal-title">
