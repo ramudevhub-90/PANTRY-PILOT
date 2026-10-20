@@ -27,6 +27,8 @@ export interface Meal {
   steps: string[];
   timer?: { label: string; minutes: number };
   reason: string;
+  /** breakfast, lunch, dinner, evening snacks… (server/pantry_pilot/mealtime.py). */
+  occasion?: string | null;
 }
 
 export interface GroceryItem {

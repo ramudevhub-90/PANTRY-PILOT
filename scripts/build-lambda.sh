@@ -13,7 +13,7 @@ mkdir -p "$OUT"
 # boto3 ships with the Lambda Python runtime, so it isn't bundled.
 "$PIP" install --quiet --target "$OUT" \
   --platform manylinux2014_aarch64 --implementation cp --python-version 3.13 --only-binary=:all: \
-  "mcp==2.3.0" "starlette>=1.7" "uvicorn>=0.54"
+  "mcp==2.3.0" "starlette>=1.7" "uvicorn>=0.54" "tzdata>=2025.2"
 
 cp -R "$ROOT/server/pantry_pilot" "$OUT/"
 find "$OUT" -name "__pycache__" -type d -prune -exec rm -rf {} +

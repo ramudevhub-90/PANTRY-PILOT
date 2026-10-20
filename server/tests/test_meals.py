@@ -1,0 +1,113 @@
+from datetime import datetime
+
+import anyio
+from mcp import Client
+from starlette.testclient import TestClient
+
+from pantry_pilot.mcp_server import create_server
+from pantry_pilot.mealtime import occasion_at, user_timezone
+from pantry_pilot.nova import MockNova
+from pantry_pilot.store import MemoryStore
+
+
+def at(hour, minute=0):
+    return occasion_at(datetime(2026, 10, 20, hour, minute))
+
+
+def test_occasion_follows_local_time():
+    assert [at(4, 59), at(5), at(10, 29), at(10, 30), at(12), at(15, 30), at(18, 30), at(22, 30), at(23, 59)] == [
+        "late-night snack", "breakfast", "breakfast", "brunch", "lunch",
+        "evening snacks", "dinner", "late-night snack", "late-night snack",
+    ]
+
+
+class IdeasNova(MockNova):
+    """Returns canned dishes and records what Nova was asked."""
+
+    def __init__(self, batches):
+        self.batches = list(batches)
+        self.requests = []
+
+    def suggest_meals(self, system, request):
+        self.requests.append((system, request))
+        return self.batches.pop(0)
+
+
+def plan(store, nova, args=None, zone=None):
+    async def run():
+        token = user_timezone.set(zone)
+        try:
+            async with Client(create_server(store, nova, lambda: "test")) as client:
+                result = await client.call_tool("plan_meals", args or {})
+                assert not result.is_error, result.content
+                return result.structured_content
+        finally:
+            user_timezone.reset(token)
+
+    return anyio.run(run)
+
+
+UPMA = {
+    "name": "Vegetable Upma", "emoji": "🥣", "minutes": 20, "servings": 2,
+    "uses": ["baby spinach", "Onion", "Unicorn dust"], "missing": ["Semolina", "onion"],
+    "steps": ["Roast the semolina.", "Cook the vegetables.", "Add water and stir."],
+    "timer_label": "upma", "timer_minutes": 8,
+}
+POHA = {"name": "Poha", "emoji": "🍚", "minutes": 15, "servings": 2, "uses": [], "missing": [], "steps": ["Rinse.", "Cook."]}
+
+
+def test_nova_meals_are_checked_against_the_pantry():
+    store = MemoryStore()
+    nova = IdeasNova([[UPMA, POHA]])
+    result = plan(store, nova, {"meal": "breakfast", "request": "something light"})
+
+    top = result["meals"][0]
+    assert result["occasion"] == "breakfast" and "Amazon Nova" in result["summary"]
+    assert top["name"] == "Vegetable Upma"
+    assert "Baby spinach" in top["uses"] and "Unicorn dust" not in top["uses"]
+    assert top["missing"] == ["Semolina"]  # onion is in the pantry
+    assert "Baby spinach" in top["rescues"] and top["timer"] == {"label": "upma", "minutes": 8}
+    assert "breakfast" in nova.requests[0][0] and "something light" in nova.requests[0][1]
+    assert [m.occasion for m in store.load("test").meals] == ["breakfast", "breakfast"]
+
+
+def test_replanning_asks_for_different_dishes():
+    store = MemoryStore()
+    nova = IdeasNova([[UPMA], [POHA]])
+    plan(store, nova, {"meal": "breakfast"})
+    second = plan(store, nova, {"meal": "breakfast"})
+    assert "Vegetable Upma" in nova.requests[1][1]
+    assert second["meals"][0]["name"] == "Poha"
+
+
+def test_falls_back_to_recipes_without_nova():
+    store = MemoryStore()
+    result = plan(store, MockNova(), {"meal": "dinner"})
+    assert "built-in recipes" in result["summary"] and result["occasion"] == "dinner"
+
+
+def test_meal_defaults_to_the_device_time_zone():
+    store = MemoryStore()
+    # One of these two zones is always at a different meal than the other (12 hours apart).
+    kolkata = plan(store, MockNova(), zone="Asia/Kolkata")["occasion"]
+    chicago = plan(store, MockNova(), zone="America/Chicago")["occasion"]
+    assert kolkata in {"breakfast", "brunch", "lunch", "evening snacks", "dinner", "late-night snack"}
+    assert kolkata != chicago
+
+
+def test_timezone_header_sets_the_request_zone():
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    from pantry_pilot.mealtime import TimezoneMiddleware
+
+    async def echo(_):
+        return JSONResponse({"zone": user_timezone.get()})
+
+    app = Starlette(routes=[Route("/", echo)])
+    app.add_middleware(TimezoneMiddleware)
+    with TestClient(app) as client:
+        assert client.get("/", headers={"X-Timezone": "Asia/Kolkata"}).json() == {"zone": "Asia/Kolkata"}
+        assert client.get("/", headers={"X-Timezone": "Not/AZone"}).json() == {"zone": None}
+        assert client.get("/").json() == {"zone": None}

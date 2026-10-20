@@ -9,6 +9,7 @@ dependencies = [
     "boto3>=1.43",
     "starlette>=1.7",
     "uvicorn>=0.54",
+    "tzdata>=2025.2",
 ]
 
 [dependency-groups]

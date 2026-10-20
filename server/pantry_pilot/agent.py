@@ -5,22 +5,24 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import AsyncIterator
-from datetime import date
 from typing import Any
 
 import anyio
 from mcp import Client
 
+from .mealtime import local_now, occasion_at
 from .models import new_id
 from .nova import Nova
 
 SYSTEM_PROMPT = """You are Pantry Pilot, a friendly kitchen assistant that people talk to through Alexa+.
-Today is {today}.
+It is {now} for the user (their local time), so the next meal is {occasion}.
 
 How to work:
 - Use the tools for every fact about the kitchen. Never guess what's in stock.
-- "What can I make?": call get_inventory with filter "expiring", then plan_meals, then recommend
-  the top meal, say which expiring food it uses, and offer to start its timer or add missing items.
+- "What can I make?": call plan_meals (pass meal when the user names one, and request for wishes
+  like vegetarian or quick), then recommend the top dish, say which expiring food it uses, and offer
+  to start its timer or add missing items. For "something else" or "another idea", call plan_meals
+  again; it suggests different dishes.
 - When the user says they bought, used, finished or threw away food, call update_inventory with
   sensible quantities and units (add / use / remove). Assume typical pack sizes if none are given.
 - When the user agrees to an offer you made ("yes", "sure"), do it.
@@ -80,7 +82,8 @@ async def run_agent(
         for t in listed.tools
         if t.name not in _HIDDEN_TOOLS
     ]
-    system = SYSTEM_PROMPT.format(today=date.today().strftime("%A %d %B %Y"))
+    now = local_now()
+    system = SYSTEM_PROMPT.format(now=now.strftime("%A %d %B %Y, %I:%M %p"), occasion=occasion_at(now))
     messages: list[dict[str, Any]] = [*history, {"role": "user", "content": [{"text": text}]}]
 
     for _ in range(max_steps):

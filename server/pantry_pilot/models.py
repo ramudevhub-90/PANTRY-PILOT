@@ -88,6 +88,8 @@ class Meal(ApiModel):
     steps: list[str]
     timer: MealTimer | None = None
     reason: str
+    occasion: str | None = None
+    """breakfast, lunch, dinner, evening snacks... (see mealtime.OCCASIONS)."""
 
 
 class Household(ApiModel):

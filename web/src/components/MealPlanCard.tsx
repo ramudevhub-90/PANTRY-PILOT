@@ -1,6 +1,7 @@
 import { Clock, Leaf, RefreshCw, ShoppingBasket, Timer, Users, UtensilsCrossed } from 'lucide-react';
 import { useAssistant } from '../agent/useAssistant';
 import { joinNames, lower } from '../lib/format';
+import { currentOccasion, planTitle } from '../lib/mealtime';
 import { usePantry } from '../state/store';
 
 export function MealPlanCard() {
@@ -8,16 +9,17 @@ export function MealPlanCard() {
   const { ask } = useAssistant();
   const busy = state.mode === 'thinking';
   const [top, ...alternatives] = state.meals;
+  const occasion = top?.occasion ?? currentOccasion();
 
   return (
     <section className="card card--meal" aria-labelledby="meal-title">
       <header className="card__head">
         <h2 id="meal-title">
           <UtensilsCrossed size={17} />
-          Tonight’s plan
+          {planTitle(occasion)}
         </h2>
         {top && (
-          <button type="button" className="link-btn" onClick={() => void ask('Plan dinner again with what I have')} disabled={busy}>
+          <button type="button" className="link-btn" onClick={() => void ask(`Suggest different ${occasion} ideas with what I have`)} disabled={busy}>
             <RefreshCw size={14} />
             Re-plan
           </button>
@@ -26,9 +28,9 @@ export function MealPlanCard() {
 
       {!top ? (
         <div className="empty">
-          <p>Pantry Pilot ranks recipes by what’s about to expire, so food gets eaten instead of thrown away.</p>
-          <button type="button" className="btn" onClick={() => void ask('What can I make for dinner?')} disabled={busy}>
-            What can I make for dinner?
+          <p>Pantry Pilot suggests dishes that use what’s about to expire, so food gets eaten instead of thrown away.</p>
+          <button type="button" className="btn" onClick={() => void ask(`What can I make for ${occasion}?`)} disabled={busy}>
+            What can I make for {occasion}?
           </button>
         </div>
       ) : (

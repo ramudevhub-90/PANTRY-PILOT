@@ -9,7 +9,7 @@ import { usePantry } from '../state/store';
 import type { AssistantMode, ChatMessage, ToolCall } from '../types';
 
 const SUGGESTIONS = [
-  'What can I make for dinner?',
+  'What can I make right now?',
   "What's about to expire?",
   "We're out of milk",
   'Set a 10 minute timer for the pasta',

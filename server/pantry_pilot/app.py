@@ -38,6 +38,7 @@ from .auth import (
 from .instacart import Instacart, InstacartError, instacart_from_env
 from .kroger import CART_URL, Kroger, KrogerError, kroger_from_env
 from .mcp_server import CONFIDENT, create_server
+from .mealtime import TimezoneMiddleware
 from .models import GroceryItem
 from .nova import BedrockNova, Nova, NovaUnavailable, nova_from_env
 from .store import Store, dumps_for_api, store_from_env
@@ -241,7 +242,7 @@ def create_app(
             async for event in call_tool_with_events(client, "update_inventory", args):
                 yield event
             count = f"{len(confirmed)} item" + ("s" if len(confirmed) != 1 else "")
-            yield {"type": "reply", "text": f"Done, I added {count} to your pantry. Want a dinner idea that uses them?"}
+            yield {"type": "reply", "text": f"Done, I added {count} to your pantry. Want a meal idea that uses them?"}
             return
 
         text = str(body.get("text", "")).strip()
@@ -593,5 +594,6 @@ def create_app(
         allow_headers=["*"],
         expose_headers=["mcp-session-id"],
     )
+    app.add_middleware(TimezoneMiddleware)  # the device's time zone, for "which meal is it now"
     app.state.mcp = app_mcp  # the MCP server itself, for in-process clients and tests
     return app

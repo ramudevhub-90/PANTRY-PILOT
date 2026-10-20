@@ -3,6 +3,7 @@
 // Unset, the app runs on the in-browser mock agent.
 import { accessToken, signOut, type AuthSettings } from '../auth/cognito';
 import type { DetectedItem, GroceryItem, KitchenTimer, Meal, PantryItem, ToolCall } from '../types';
+import { deviceTimeZone } from '../lib/mealtime';
 
 const configured: string | undefined = import.meta.env.VITE_API_URL;
 export const HAS_SERVER = Boolean(configured);
@@ -50,6 +51,8 @@ async function apiFetch(path: string, init: RequestInit = {}): Promise<Response>
   const token = await accessToken();
   const headers = new Headers(init.headers);
   if (token) headers.set('Authorization', `Bearer ${token}`);
+  // The server runs in UTC; this tells it which meal is due on the user's device.
+  if (deviceTimeZone) headers.set('X-Timezone', deviceTimeZone);
   const response = await fetch(`${API_URL}${path}`, { ...init, headers });
   if (response.status === 401 && token) signOut();
   return response;

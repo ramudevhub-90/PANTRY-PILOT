@@ -12,6 +12,8 @@ from mcp.server.mcpserver import MCPServer
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel
 
+from .meal_ideas import suggest_request, to_meals
+from .mealtime import current_occasion
 from .models import Category, GroceryItem, Household, KitchenTimer, PantryItem
 from .nova import Nova, parse_data_url
 from .recipes import RECIPES, plan_meals
@@ -20,7 +22,8 @@ from .store import Store
 INSTRUCTIONS = """Pantry Pilot keeps track of a household's food: what's in stock, what expires soon,
 what to cook, the grocery list and kitchen timers.
 - Call get_inventory before answering questions about what's in the kitchen.
-- For "what can I make", call plan_meals; it favours food that is about to expire.
+- For "what can I make", call plan_meals; it favours food that is about to expire and picks the
+  meal (breakfast, lunch, dinner, snacks...) from the user's local time unless one is named.
 - When the user buys, uses or finishes food, call update_inventory.
 - scan_pantry only reads photos, videos or bills and returns detections; save them with
   update_inventory(action="add") after the user confirms."""
@@ -227,22 +230,45 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
 
     # The Python name avoids shadowing the imported planner; MCP clients see "plan_meals".
     @mcp.tool(name="plan_meals", title="Plan meals")
-    def plan_meals_tool(limit: int = 3) -> dict[str, Any]:
-        """Rank recipes by how well they use food that's about to expire and what's in stock.
-        Saves the plan so the user sees it, and returns the top meals with missing ingredients."""
+    async def plan_meals_tool(
+        meal: Literal["breakfast", "brunch", "lunch", "evening snacks", "dinner", "late-night snack"] | None = None,
+        request: str | None = None,
+        limit: int = 3,
+    ) -> dict[str, Any]:
+        """Suggest dishes that use food about to expire. `meal` defaults to the one due at the
+        user's local time; pass it when the user names one ("plan lunch"). `request` carries wishes
+        such as "vegetarian", "South Indian" or "under 20 minutes". Calling it again suggests
+        different dishes. Saves the plan so the user sees it."""
         household = load()
-        meals = plan_meals(household.inventory, limit=max(1, min(limit, 5)))
+        occasion = meal or current_occasion()
+        count = max(1, min(limit, 5))
+        avoid = [m.name for m in household.meals]
+        system, text = suggest_request(household.inventory, occasion, count, request, avoid)
+        try:
+            raw = await anyio.to_thread.run_sync(nova.suggest_meals, system, text)
+            meals = to_meals(raw, household.inventory, count)
+        except Exception:
+            meals = []
+        source = "Amazon Nova"
+        if not meals:
+            meals = plan_meals(household.inventory, limit=count)
+            source = f"{len(RECIPES)} built-in recipes"
+        for m in meals:
+            m.occasion = occasion
         household.meals = meals
         save(household)
         return {
-            "summary": f"Ranked {len(RECIPES)} recipes · top pick: {meals[0].name}",
+            "summary": f"{occasion.capitalize()} ideas from {source} · top pick: {meals[0].name}",
+            "occasion": occasion,
             "meals": [
                 {
                     "id": m.id,
                     "name": m.name,
                     "minutes": m.minutes,
+                    "uses": m.uses,
                     "rescues": m.rescues,
                     "missing": m.missing,
+                    "steps": m.steps,
                     "timer": m.timer.model_dump() if m.timer else None,
                     "reason": m.reason,
                 }
