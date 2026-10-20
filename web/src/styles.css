@@ -2152,3 +2152,224 @@ p {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* Grocery list */
+
+.glist__progress-label {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.glist__progress {
+  height: 4px;
+  margin: -4px 0 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+
+.glist__progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.35s ease;
+}
+
+.glist {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gitem__tap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 12px 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+
+.gitem__tap:hover {
+  border-color: var(--accent);
+}
+
+.gitem__tap:active {
+  transform: scale(0.99);
+}
+
+.gitem__tap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.gitem__check {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--text-3);
+  border-radius: 50%;
+  color: var(--accent-ink);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.gitem__emoji {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.gitem__body {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.gitem__name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gitem__note {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gitem__source {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text-3);
+}
+
+.gitem.is-checked .gitem__tap {
+  background: transparent;
+}
+
+.gitem.is-checked .gitem__check {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.gitem.is-checked .gitem__name {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+
+.gitem.is-checked .gitem__emoji {
+  opacity: 0.5;
+}
+
+.glist__done {
+  margin-top: 12px;
+}
+
+.glist__done summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 2px 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.glist__done summary::-webkit-details-marker {
+  display: none;
+}
+
+.glist__done summary > span::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s ease;
+}
+
+.glist__done[open] summary > span::before {
+  transform: rotate(90deg);
+}
+
+.glist__empty {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 18px 8px 8px;
+  text-align: center;
+}
+
+.glist__empty > span {
+  font-size: 34px;
+}
+
+.glist__empty p {
+  margin: 0;
+}
+
+.glist__suggest {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.glist__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 10px 4px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.gchip:hover {
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.add-row__go:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
