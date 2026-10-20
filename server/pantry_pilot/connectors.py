@@ -389,7 +389,19 @@ async def tool_catalog(
     ]
     store.save_record(f"tool-catalog#{provider.id}", {"tools": catalog, "at": time.time()})
     log.info("%s MCP tools: %s", provider.name, json.dumps(catalog))
+    # Full descriptions and argument formats of the shopping tools, one log line each.
+    for t in listed.tools:
+        if t.name in _SHOPPING_TOOLS:
+            log.info("%s tool %s: %s", provider.name, t.name, json.dumps({"description": t.description, "input": t.input_schema}))
     return catalog
+
+
+_SHOPPING_TOOLS = {
+    "search_products", "search_multiple_products", "get_past_order_items", "list_saved_addresses",
+    "select_saved_address", "update_cart", "view_cart", "get_payment_methods", "create_order",
+    "create_online_payment_order", "check_payment_status", "update_drop_zone",
+    "get_addresses", "get_cart", "clear_cart", "get_payment_options", "checkout", "confirm_order",
+}
 
 
 def _first_error(exc: BaseException) -> BaseException:

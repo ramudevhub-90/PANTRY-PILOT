@@ -40,6 +40,13 @@ How to reply (your words are spoken aloud):
 
 # Scanning needs media the chat channel doesn't carry, so the web app calls it directly.
 _HIDDEN_TOOLS = {"scan_pantry"}
+# Kroger and Instacart only work in the US; elsewhere the assistant shouldn't even offer them.
+_US_ONLY_TOOLS = {"find_kroger_products", "add_to_kroger_cart", "shop_on_instacart"}
+
+
+def in_us(now: Any) -> bool:
+    zone = str(getattr(now, "tzinfo", "") or "")
+    return zone.startswith("America/") or zone in {"Pacific/Honolulu", "US/Eastern", "US/Central", "US/Mountain", "US/Pacific"}
 _THINKING = re.compile(r"<thinking>.*?</thinking>", re.S)
 
 
@@ -83,10 +90,11 @@ async def run_agent(
 ) -> AsyncIterator[dict[str, Any]]:
     """One user turn: loop Nova -> MCP tools until Nova answers in words."""
     listed = await client.list_tools()
+    hidden = _HIDDEN_TOOLS | (set() if in_us(local_now()) else _US_ONLY_TOOLS)
     tools = [
         {"toolSpec": {"name": t.name, "description": t.description or "", "inputSchema": {"json": t.input_schema}}}
         for t in listed.tools
-        if t.name not in _HIDDEN_TOOLS
+        if t.name not in hidden
     ]
     now = local_now()
     system = SYSTEM_PROMPT.format(now=now.strftime("%A %d %B %Y, %I:%M %p"), occasion=occasion_at(now))
