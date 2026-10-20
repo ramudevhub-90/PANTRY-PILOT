@@ -60,7 +60,7 @@ function initialState(): PantryState {
     meals: [],
     grocery: [],
     timers: [],
-    preferences: { diet: 'any', cuisines: [], avoid: [], location: '' },
+    preferences: { diet: 'any', cuisines: [], avoid: [], location: '', homeCuisine: '' },
     notifications: { whatsapp: '' },
     messages: [],
     mode: 'idle',

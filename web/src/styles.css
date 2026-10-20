@@ -2659,3 +2659,39 @@ p {
   font: inherit;
   font-size: 16px;
 }
+
+.prefs__home {
+  color: var(--soon);
+}
+
+.home-ask {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.home-ask__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.home-ask__head .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+
+.home-ask p {
+  margin: 0;
+}
+
+.home-ask__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}

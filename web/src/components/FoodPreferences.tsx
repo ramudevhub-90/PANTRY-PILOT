@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { LocateFixed, MapPin, SlidersHorizontal } from 'lucide-react';
+import { House, LocateFixed, MapPin, SlidersHorizontal, X } from 'lucide-react';
 import { HAS_SERVER, api } from '../agent/remote';
 import { deviceCity } from '../lib/geo';
 import { currentOccasion, deviceTimeZone, placeForZone } from '../lib/mealtime';
@@ -16,6 +16,29 @@ const DIETS: { value: Diet; label: string }[] = [
 ];
 
 const ASKED_KEY = 'pantry-pilot.locationAsked';
+const HOME_ASKED_KEY = 'pantry-pilot.homeFoodAsked';
+
+/** Regional home cooking people often carry with them when they move for work. */
+const HOME_FOODS = [
+  'Bengali', 'Punjabi', 'Tamil', 'Kerala', 'Andhra', 'Telangana', 'Kannada', 'Marathi',
+  'Gujarati', 'Rajasthani', 'Bihari', 'Odia', 'North-East', 'Kashmiri', 'Goan', 'Konkani',
+];
+
+function homeAskedBefore(): boolean {
+  try {
+    return localStorage.getItem(HOME_ASKED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function rememberHomeAsked() {
+  try {
+    localStorage.setItem(HOME_ASKED_KEY, '1');
+  } catch {
+    // Storage blocked: the question may show again next visit.
+  }
+}
 
 function askedBefore(): boolean {
   try {
@@ -48,6 +71,8 @@ export function FoodPreferences() {
   const [cuisines, setCuisines] = useState('');
   const [avoid, setAvoid] = useState('');
   const [location, setLocation] = useState('');
+  const [homeCuisine, setHomeCuisine] = useState('');
+  const [homeDismissed, setHomeDismissed] = useState(homeAskedBefore);
   const [saving, setSaving] = useState(false);
   const [locating, setLocating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,6 +118,18 @@ export function FoodPreferences() {
   if (!HAS_SERVER) return null;
 
   const place = prefs.location ? prefs.location.replace(/, India$/, '') : placeForZone(deviceTimeZone);
+  const home = prefs.homeCuisine && prefs.homeCuisine.toLowerCase() !== 'local' ? prefs.homeCuisine : '';
+  const askHome = loaded && !prefs.homeCuisine && prefs.cuisines.length === 0 && !homeDismissed;
+
+  async function chooseHome(value: string) {
+    rememberHomeAsked();
+    setHomeDismissed(true);
+    try {
+      await apply({ homeCuisine: value });
+    } catch {
+      setError('Couldn’t save that. Try again under Change.');
+    }
+  }
   const placeNote = prefs.location ? '' : deviceTimeZone && place !== deviceTimeZone ? ` (${deviceTimeZone})` : '';
 
   const label = DIETS.find((d) => d.value === prefs.diet)?.label ?? 'Any diet';
@@ -107,6 +144,7 @@ export function FoodPreferences() {
     setCuisines(prefs.cuisines.join(', '));
     setAvoid(prefs.avoid.join(', '));
     setLocation(prefs.location);
+    setHomeCuisine(prefs.homeCuisine === 'local' ? '' : prefs.homeCuisine);
     setError(null);
     setEditing(true);
   }
@@ -116,7 +154,13 @@ export function FoodPreferences() {
     setSaving(true);
     setError(null);
     try {
-      await apply({ diet, cuisines: list(cuisines), avoid: list(avoid), location: location.trim() });
+      await apply({
+        diet,
+        cuisines: list(cuisines),
+        avoid: list(avoid),
+        location: location.trim(),
+        homeCuisine: homeCuisine.trim() || (prefs.homeCuisine ? 'local' : ''),
+      });
       setEditing(false);
     } catch {
       setError('Couldn’t save. Try again.');
@@ -125,8 +169,40 @@ export function FoodPreferences() {
     }
   }
 
+  const homeAsk = askHome ? (
+    <div className="home-ask">
+      <div className="home-ask__head">
+        <strong>What food did you grow up with?</strong>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="Not now"
+          onClick={() => {
+            rememberHomeAsked();
+            setHomeDismissed(true);
+          }}
+        >
+          <X size={15} />
+        </button>
+      </div>
+      <p className="muted small-print">Moved for work? Pantry Pilot can cook what you miss from home, with what {place} shops sell.</p>
+      <div className="home-ask__chips">
+        <button type="button" className="gchip" onClick={() => void chooseHome('local')}>
+          Same as {place.split(',')[0]}
+        </button>
+        {HOME_FOODS.map((f) => (
+          <button key={f} type="button" className="gchip" onClick={() => void chooseHome(f)}>
+            {f}
+          </button>
+        ))}
+      </div>
+    </div>
+  ) : null;
+
   if (!editing) {
     return (
+      <>
+      {homeAsk}
       <p className="prefs muted small-print">
         <span
           className="prefs__place"
@@ -136,6 +212,12 @@ export function FoodPreferences() {
           {place}
           {placeNote}
         </span>
+        {home && (
+          <span className="prefs__place prefs__home" title={`Mostly ${home} home cooking`}>
+            <House size={13} aria-hidden="true" />
+            {home} food
+          </span>
+        )}
         {!prefs.location && (
           <button type="button" className="link-btn" onClick={() => void locate()} disabled={locating}>
             <LocateFixed size={13} aria-hidden="true" />
@@ -149,6 +231,7 @@ export function FoodPreferences() {
         </button>
         {error && <span className="auth-error">{error}</span>}
       </p>
+      </>
     );
   }
 
@@ -157,6 +240,10 @@ export function FoodPreferences() {
       <label>
         City
         <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Bengaluru, Karnataka" />
+      </label>
+      <label>
+        Food you grew up with
+        <input value={homeCuisine} onChange={(e) => setHomeCuisine(e.target.value)} placeholder="Bengali (leave empty for local food)" />
       </label>
       <label>
         Diet

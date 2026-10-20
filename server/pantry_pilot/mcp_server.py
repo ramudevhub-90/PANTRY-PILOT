@@ -268,7 +268,10 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
             m.occasion = occasion
         household.meals = meals
         save(household)
+        ask_home = not prefs.home_cuisine and not prefs.cuisines
         return {
+            # Not asked yet: the assistant asks once which food they grew up with.
+            **({"ask_home_cuisine": True} if ask_home else {}),
             "summary": f"{occasion.capitalize()} ideas from {source} · "
             + (f"top pick: {meals[0].name}" if meals else "nothing fits right now"),
             "occasion": occasion,
@@ -294,11 +297,14 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
         cuisines: list[str] | None = None,
         avoid: list[str] | None = None,
         location: str | None = None,
+        home_cuisine: str | None = None,
     ) -> dict[str, Any]:
         """Remember what the household eats, so meal ideas follow it: diet ("we're vegetarian",
         "we eat eggs but no meat" = eggetarian, "Jain"), favourite cuisines ("we like South Indian
         food"), ingredients to avoid (allergies, dislikes) and where they live ("we're in Pune" =
-        "Pune, Maharashtra, India"). Only the fields given change; pass an empty list to clear
+        "Pune, Maharashtra, India"), and the food they grew up with when it differs from where they
+        live ("we're Bengali" in Bengaluru = home_cuisine "Bengali"; "local" = same as where they
+        live). Only the fields given change; pass an empty list to clear
         cuisines or avoid, or an empty location to go back to the time zone's country."""
         household = load()
         prefs = household.preferences
@@ -310,8 +316,12 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
             prefs.avoid = [a.strip() for a in avoid if a.strip()][:12]
         if location is not None:
             prefs.location = location.strip()[:80]
+        if home_cuisine is not None:
+            prefs.home_cuisine = home_cuisine.strip()[:40]
         save(household)
         parts = [prefs.location] if prefs.location else []
+        if prefs.home_cuisine and prefs.home_cuisine.lower() != "local":
+            parts.append(f"{prefs.home_cuisine} home food")
         parts.append(prefs.diet if prefs.diet != "any" else "any diet")
         if prefs.cuisines:
             parts.append(", ".join(prefs.cuisines))

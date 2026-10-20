@@ -103,4 +103,6 @@ export interface FoodPreferences {
   avoid: string[];
   /** City and region, e.g. "Bengaluru, Karnataka, India"; empty means the time zone's country. */
   location: string;
+  /** Food they grew up with ("Bengali"), when it differs from where they live; "local" = same. */
+  homeCuisine: string;
 }

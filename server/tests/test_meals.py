@@ -173,3 +173,21 @@ def test_saved_city_steers_meal_ideas():
     plan(store, nova, {"meal": "breakfast"}, zone="Asia/Kolkata")
     system = nova.requests[0][0]
     assert "home cook in Bengaluru, Karnataka, India" in system and "that city and state" in system
+
+
+def test_home_cuisine_beats_the_city_for_people_who_moved():
+    store = MemoryStore()
+    saved = call_tool(store, "set_food_preferences", {"location": "Bengaluru, Karnataka, India", "home_cuisine": "Bengali"})
+    assert saved["summary"] == "Saved: Bengaluru, Karnataka, India · Bengali home food · any diet"
+    nova = IdeasNova([[POHA]])
+    result = plan(store, nova, {"meal": "dinner"}, zone="Asia/Kolkata")
+    system = nova.requests[0][0]
+    assert "home cook in Bengaluru, Karnataka, India" in system and "grew up eating Bengali food" in system
+    assert "ask_home_cuisine" not in result
+
+
+def test_planner_asks_for_home_food_until_it_is_known():
+    store = MemoryStore()
+    assert plan(store, MockNova(), {"meal": "lunch"})["ask_home_cuisine"] is True
+    call_tool(store, "set_food_preferences", {"home_cuisine": "local"})
+    assert "ask_home_cuisine" not in plan(store, MockNova(), {"meal": "lunch"})
