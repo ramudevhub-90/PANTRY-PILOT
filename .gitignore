@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+*.local
+.data/
+.pytest_cache/
+.DS_Store
+__pycache__/
+.venv/
+.aws-sam/
+cdk.out/
+infra/build/
+.origin-secret
+.demo-login

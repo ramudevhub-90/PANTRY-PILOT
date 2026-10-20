@@ -1,0 +1,18 @@
+[project]
+name = "pantry-pilot"
+version = "0.1.0"
+description = "Pantry Pilot: a kitchen agent for Alexa+, served as an MCP server backed by Amazon Nova."
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "mcp==2.3.0",
+    "boto3>=1.43",
+    "starlette>=1.7",
+    "uvicorn>=0.54",
+]
+
+[dependency-groups]
+dev = ["pytest>=9", "httpx>=0.28"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

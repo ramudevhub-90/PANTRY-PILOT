@@ -1,0 +1,560 @@
+"""HTTP entry point: /mcp for Alexa+ and other MCP clients, /api/* for the Pantry Pilot web app."""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+import urllib.parse
+from collections.abc import AsyncIterator, Callable
+from typing import Any, Literal
+
+import anyio
+from mcp import Client
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.applications import Starlette
+from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
+
+from . import connectors, voice
+from .agent import call_tool_with_events, run_agent
+from .auth import (
+    ALL_SCOPES,
+    AccountDirectory,
+    AuthConfig,
+    BearerAuthMiddleware,
+    TokenVerifier,
+    authorization_server_metadata,
+    authorize_redirect,
+    current_user,
+    is_mcp_path,
+    is_private_api_path,
+    jwks_signing_key,
+    protected_resource_metadata,
+    public_base_url,
+    token_proxy,
+)
+from .instacart import Instacart, InstacartError, instacart_from_env
+from .kroger import CART_URL, Kroger, KrogerError, kroger_from_env
+from .mcp_server import CONFIDENT, create_server
+from .models import GroceryItem
+from .nova import BedrockNova, Nova, NovaUnavailable, nova_from_env
+from .store import Store, dumps_for_api, store_from_env
+
+
+def _env_list(name: str) -> list[str]:
+    return [v.strip() for v in os.environ.get(name, "").split(",") if v.strip()]
+
+
+class OriginSecretMiddleware:
+    """On AWS the Lambda URL is public; only CloudFront knows this header value.
+    /health stays open for the Lambda Web Adapter's readiness check."""
+
+    def __init__(self, app: Any, secret: str) -> None:
+        self.app = app
+        self.secret = secret.encode()
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "http" and scope["path"] != "/health":
+            if dict(scope["headers"]).get(b"x-origin-verify") != self.secret:
+                await JSONResponse({"error": "forbidden"}, status_code=403)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+def create_app(
+    store: Store | None = None,
+    nova: Nova | None = None,
+    household_id: str | None = None,
+    auth: AuthConfig | None = None,
+    signing_key: Callable[[str], Any] | None = None,
+    connector_client: connectors.ClientFactory = connectors.remote_client,
+    account_directory: AccountDirectory | None = None,
+    instacart: Instacart | None = None,
+    kroger: Kroger | None = None,
+) -> Starlette:
+    """`household_id` is the pantry used when nobody is signed in (local development without
+    Cognito). With Cognito configured, each signed-in user gets their own pantry."""
+    store = store or store_from_env()
+    nova = nova or nova_from_env()
+    instacart = instacart or instacart_from_env()
+    kroger = kroger or kroger_from_env()
+    default_household = household_id or os.environ.get("HOUSEHOLD_ID", "demo")
+    auth = auth or AuthConfig.from_env()
+
+    def household_id_now() -> str:
+        return current_user.get() or default_household
+
+    mcp = create_server(store, nova, household_id_now)
+    histories: dict[str, list[dict[str, Any]]] = {}
+
+    @mcp.custom_route("/api/config", methods=["GET"])
+    async def config(_: Request) -> Response:
+        """What the web app needs to sign users in; public, and nothing in it is secret."""
+        if not auth or not auth.web_client_id:
+            return JSONResponse({"auth": None})
+        return JSONResponse({"auth": {
+            "region": auth.region,
+            "userPoolId": auth.user_pool_id,
+            "clientId": auth.web_client_id,
+            "emailOtp": auth.email_otp,
+        }})
+
+    if auth and auth.email_otp:
+        accounts = account_directory or AccountDirectory(auth)
+
+        @mcp.custom_route("/api/auth/start", methods=["POST"])
+        async def start_email_sign_in(request: Request) -> Response:
+            """Before an email-code sign-in: make sure the account exists. Same answer either way,
+            so this doesn't reveal who has an account."""
+            email = str((await request.json()).get("email", ""))
+            try:
+                await anyio.to_thread.run_sync(accounts.ensure_account, email)
+            except ValueError as err:
+                return JSONResponse({"error": str(err)}, status_code=400)
+            return JSONResponse({"ok": True})
+
+    if auth:
+        # OAuth for Alexa+ (see auth.py).
+        @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
+        async def resource_metadata(request: Request) -> Response:
+            return protected_resource_metadata(request)
+
+        @mcp.custom_route("/.well-known/oauth-protected-resource/mcp", methods=["GET"])
+        async def resource_metadata_for_mcp(request: Request) -> Response:
+            return protected_resource_metadata(request)
+
+        @mcp.custom_route("/.well-known/oauth-authorization-server", methods=["GET"])
+        async def server_metadata(request: Request) -> Response:
+            return authorization_server_metadata(request)
+
+        @mcp.custom_route("/oauth/authorize", methods=["GET"])
+        async def authorize(request: Request) -> Response:
+            return authorize_redirect(auth, request)
+
+        @mcp.custom_route("/oauth/token", methods=["POST"])
+        async def token(request: Request) -> Response:
+            return await token_proxy(auth, request)
+
+    def state_response() -> Response:
+        hid = household_id_now()
+        household = store.load(hid)
+        # Drop timers that finished more than a minute ago; the web app announces them.
+        cutoff = int(time.time() * 1000) - 60_000
+        if any(t.ends_at < cutoff for t in household.timers):
+            household.timers = [t for t in household.timers if t.ends_at >= cutoff]
+            store.save(hid, household)
+        return Response(dumps_for_api(household), media_type="application/json")
+
+    @mcp.custom_route("/api/state", methods=["GET"])
+    async def get_state(_: Request) -> Response:
+        return state_response()
+
+    @mcp.custom_route("/api/voice/stream", methods=["GET"])
+    async def voice_stream(request: Request) -> Response:
+        """A signed Amazon Transcribe streaming URL for hands-free "Alexa, …" in any browser."""
+        try:
+            url = await anyio.to_thread.run_sync(voice.stream_url, request.query_params.get("lang", "en-US"))
+        except voice.VoiceUnavailable as err:
+            return JSONResponse({"error": str(err)}, status_code=503)
+        return JSONResponse({"url": url, "sampleRate": voice.SAMPLE_RATE})
+
+    @mcp.custom_route("/api/turn", methods=["POST"])
+    async def turn(request: Request) -> Response:
+        """One assistant turn, streamed as server-sent events for the tool trace.
+        Body: {text} for chat, {images|video|document, kind} to scan, or {confirmItems} to save a scan."""
+        body = await request.json()
+
+        async def events() -> AsyncIterator[str]:
+            async with Client(mcp) as client:
+                async for event in _turn_events(body, client):
+                    yield f"data: {json.dumps(event)}\n\n"
+            household = json.loads(dumps_for_api(store.load(household_id_now())))
+            yield f"data: {json.dumps({'type': 'state', 'state': household})}\n\n"
+
+        return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+    async def _turn_events(body: dict[str, Any], client: Client) -> AsyncIterator[dict[str, Any]]:
+        media_args = {k: body[k] for k in ("images", "video", "document") if body.get(k)}
+        if media_args:
+            # Show sizes rather than megabytes of base64 in the tool trace.
+            display = {k: f"{len(v)} photos" if k == "images" else "attached" for k, v in media_args.items()}
+            display["kind"] = body.get("kind", "auto")
+            payload: dict[str, Any] = {}
+            ok = True
+            async for event in call_tool_with_events(client, "scan_pantry", {**media_args, "kind": display["kind"]}, display):
+                if event["type"] == "tool_end":
+                    payload, ok = event["result"], event["ok"]
+                yield event
+            if not ok:
+                yield {"type": "reply", "text": f"Sorry, I couldn't read that. {payload.get('summary', '')}".strip()}
+                return
+            items = payload.get("items", [])
+            unsure = sum(1 for i in items if i["confidence"] < CONFIDENT)
+            check = f", and {unsure} {'need' if unsure > 1 else 'needs'} a quick check" if unsure else ""
+            yield {"type": "detections", "items": items}
+            yield {"type": "reply", "text": f"I found {len(items)} items{check}. Fix any quantities, then tap Add to pantry."}
+            return
+
+        if confirmed := body.get("confirmItems"):
+            args = {
+                "action": "add",
+                "source": "scan",
+                "items": [
+                    {k: i.get(k) for k in ("name", "quantity", "unit", "emoji", "category")}
+                    | {"expires_in_days": i.get("expiresInDays", i.get("expires_in_days"))}
+                    for i in confirmed
+                ],
+            }
+            async for event in call_tool_with_events(client, "update_inventory", args):
+                yield event
+            count = f"{len(confirmed)} item" + ("s" if len(confirmed) != 1 else "")
+            yield {"type": "reply", "text": f"Done, I added {count} to your pantry. Want a dinner idea that uses them?"}
+            return
+
+        text = str(body.get("text", "")).strip()
+        if not text:
+            yield {"type": "reply", "text": "I didn't catch that. Could you say it again?"}
+            return
+        try:
+            history = histories.setdefault(household_id_now(), [])
+            async for event in run_agent(text, history, client, nova):
+                yield event
+        except NovaUnavailable as err:
+            yield {"type": "reply", "text": str(err)}
+
+    @mcp.custom_route("/api/pantry", methods=["POST"])
+    async def add_to_pantry(request: Request) -> Response:
+        """Manual entry from the dashboard: {items: [{name, quantity, unit, category?, emoji?, expiresInDays?}]}.
+        Goes through the same update_inventory MCP tool the agent and Alexa+ use."""
+        items = (await request.json()).get("items") or []
+        args = {
+            "action": "add",
+            "source": "manual",
+            "items": [
+                {k: i.get(k) for k in ("name", "quantity", "unit", "category", "emoji")}
+                | {"expires_in_days": i.get("expiresInDays")}
+                for i in items
+                if str(i.get("name", "")).strip()
+            ],
+        }
+        async with Client(mcp) as client:
+            result = await client.call_tool("update_inventory", args)
+        if result.is_error:
+            return JSONResponse({"error": "Couldn't add that item"}, status_code=400)
+        return state_response()
+
+    # ---------- Grocery-app connectors (Swiggy Instamart, Zepto); see connectors.py ----------
+
+    async def import_orders(provider_id: str) -> dict[str, Any]:
+        """Sync one app's new delivered orders into the pantry through update_inventory."""
+        provider = connectors.PROVIDERS[provider_id]
+        result = await connectors.sync_orders(store, household_id_now(), provider, nova, connector_client)
+        if result.items:
+            args = {
+                "action": "add",
+                "source": "order",
+                "items": [
+                    {"name": i.name, "quantity": i.quantity, "unit": i.unit, "emoji": i.emoji,
+                     "category": i.category, "expires_in_days": i.expires_in_days}
+                    for i in result.items
+                ],
+            }
+            async with Client(mcp) as client:
+                await client.call_tool("update_inventory", args)
+        orders, items = len(result.new_orders), len(result.items)
+        summary = (
+            f"Imported {items} item{'s' if items != 1 else ''} from {orders} new {provider.name} order{'s' if orders != 1 else ''}"
+            if orders else f"No new delivered {provider.name} orders"
+        )
+        return {"summary": summary, "orders": result.new_orders, "items": [i.name for i in result.items]}
+
+    @mcp.tool(title="Sync grocery orders")
+    async def sync_grocery_orders(app: Literal["zepto", "swiggy"]) -> dict[str, Any]:
+        """Import the user's newly delivered Zepto or Swiggy Instamart orders into the pantry.
+        Only reads order history; never places, changes or pays for orders."""
+        try:
+            return await import_orders(app)
+        except connectors.ConnectorError as err:
+            return {"summary": str(err), "orders": [], "items": []}
+
+    def connector_or_404(request: Request) -> connectors.Provider | None:
+        return connectors.PROVIDERS.get(request.path_params["provider"])
+
+    async def connector_action(request: Request, action: Callable[[connectors.Provider], Any]) -> Response:
+        provider = connector_or_404(request)
+        if not provider:
+            return JSONResponse({"error": "Unknown app"}, status_code=404)
+        try:
+            extra = await action(provider)
+        except connectors.ConnectorError as err:
+            return JSONResponse({"error": str(err)}, status_code=400)
+        return JSONResponse({"connectors": connectors.status(store, household_id_now(), public_base_url(request)), **(extra or {})})
+
+    @mcp.custom_route("/api/connectors", methods=["GET"])
+    async def list_connectors(request: Request) -> Response:
+        return JSONResponse({"connectors": connectors.status(store, household_id_now(), public_base_url(request))})
+
+    @mcp.custom_route("/api/connectors/{provider}/start", methods=["POST"])
+    async def start_connector(request: Request) -> Response:
+        user = household_id_now()
+
+        app_url = public_base_url(request)
+
+        async def start(p: connectors.Provider) -> dict[str, Any]:
+            url = await anyio.to_thread.run_sync(connectors.start_sign_in, store, user, p, app_url)
+            return {"authUrl": url, "directReturn": connectors.redirect_uri_for(p, app_url) != connectors.REDIRECT_URI}
+
+        return await connector_action(request, start)
+
+    @mcp.custom_route("/api/connectors/{provider}/callback", methods=["GET"])
+    async def connector_callback(request: Request) -> Response:
+        """Where Swiggy (and any app that allows our address) returns the browser after sign-in.
+        Public: the one-time state from start_sign_in says whose account to connect."""
+        provider = connector_or_404(request)
+        if not provider:
+            return RedirectResponse("/?connectError=" + urllib.parse.quote("Unknown app"), status_code=303)
+        if error := request.query_params.get("error"):
+            reason = request.query_params.get("error_description") or error
+            message = f"{provider.name} sign-in was cancelled ({reason})."
+            return RedirectResponse("/?connectError=" + urllib.parse.quote(message), status_code=303)
+        try:
+            await anyio.to_thread.run_sync(connectors.finish_from_redirect, store, provider, str(request.url))
+        except connectors.ConnectorError as err:
+            return RedirectResponse("/?connectError=" + urllib.parse.quote(str(err)), status_code=303)
+        return RedirectResponse(f"/?connected={provider.id}", status_code=303)
+
+    @mcp.custom_route("/api/connectors/{provider}/finish", methods=["POST"])
+    async def finish_connector(request: Request) -> Response:
+        user, url = household_id_now(), str((await request.json()).get("redirectUrl", ""))
+
+        async def finish(p: connectors.Provider) -> None:
+            await anyio.to_thread.run_sync(connectors.finish_sign_in, store, user, p, url)
+
+        return await connector_action(request, finish)
+
+    @mcp.custom_route("/api/connectors/{provider}/sync", methods=["POST"])
+    async def sync_connector(request: Request) -> Response:
+        async def sync(p: connectors.Provider) -> dict[str, Any]:
+            result = await import_orders(p.id)
+            return {"sync": result, "state": json.loads(dumps_for_api(store.load(household_id_now())))}
+
+        return await connector_action(request, sync)
+
+    @mcp.custom_route("/api/connectors/{provider}/disconnect", methods=["POST"])
+    async def disconnect_connector(request: Request) -> Response:
+        user = household_id_now()
+
+        async def disconnect(p: connectors.Provider) -> None:
+            connectors.disconnect(store, user, p)
+
+        return await connector_action(request, disconnect)
+
+    # ---------- Instacart (US): send the grocery list to an Instacart shopping-list page ----------
+
+    async def instacart_link(linkback: str | None) -> dict[str, Any]:
+        hid = household_id_now()
+        names = [g.name for g in store.load(hid).grocery if not g.checked]
+        url = await anyio.to_thread.run_sync(instacart.shopping_list_url, store, hid, names, linkback)
+        noun = "item" if len(names) == 1 else "items"
+        return {"url": url, "items": names, "summary": f"Your Instacart list with {len(names)} {noun} is ready."}
+
+    @mcp.tool(title="Shop on Instacart")
+    async def shop_on_instacart() -> dict[str, Any]:
+        """US only: put the open grocery list on an Instacart page where the user picks a store and
+        checks out themselves. Pantry Pilot never places or pays for the order. Tell the user the
+        link is waiting in the Pantry Pilot app; don't read the URL aloud."""
+        try:
+            return await instacart_link(None)
+        except InstacartError as err:
+            return {"url": None, "items": [], "summary": str(err)}
+
+    @mcp.custom_route("/api/instacart", methods=["GET"])
+    async def instacart_status(_: Request) -> Response:
+        enabled = await anyio.to_thread.run_sync(lambda: instacart.enabled)
+        return JSONResponse({"enabled": enabled})
+
+    @mcp.custom_route("/api/instacart", methods=["POST"])
+    async def instacart_shop(request: Request) -> Response:
+        try:
+            return JSONResponse(await instacart_link(public_base_url(request)))
+        except InstacartError as err:
+            return JSONResponse({"error": str(err)}, status_code=400)
+
+    # ---------- Kroger (US): match the grocery list, add the products the user picks to their cart ----------
+
+    async def kroger_matches(names: list[str]) -> list[dict[str, Any]]:
+        results: dict[str, list[dict[str, Any]]] = {}
+
+        async def one(name: str) -> None:
+            results[name] = await anyio.to_thread.run_sync(kroger.search, name)
+
+        async with anyio.create_task_group() as tg:
+            for name in names:
+                tg.start_soon(one, name)
+        return [{"item": n, "products": results.get(n, [])} for n in names]
+
+    def kroger_fail(err: Exception) -> Response:
+        if isinstance(err, BaseExceptionGroup):
+            err = next((e for e in err.exceptions if isinstance(e, KrogerError)), err)
+        return JSONResponse({"error": str(err) if isinstance(err, KrogerError) else "Kroger is unavailable."}, status_code=400)
+
+    @mcp.tool(title="Find Kroger products")
+    async def find_kroger_products(items: list[str]) -> dict[str, Any]:
+        """US only. Look up grocery items in Kroger's catalog. Read the top match for each item back to
+        the user (description and size, exactly as given) and ask before adding anything; then call
+        add_to_kroger_cart with the UPCs they agreed to. Never compare these with other stores' prices."""
+        try:
+            matches = await kroger_matches([i for i in items if i.strip()][:10])
+        except (KrogerError, BaseExceptionGroup) as err:
+            return {"matches": [], "summary": str(err) if isinstance(err, KrogerError) else "Kroger is unavailable."}
+        found = [m for m in matches if m["products"]]
+        return {"matches": matches, "summary": f"Found {len(found)} of {len(matches)} items at Kroger."}
+
+    @mcp.tool(title="Add to Kroger cart")
+    async def add_to_kroger_cart(upcs: list[str], modality: Literal["PICKUP", "DELIVERY"] = "PICKUP") -> dict[str, Any]:
+        """US only. Add products to the user's own Kroger cart. Only call this with UPCs from
+        find_kroger_products that the user has just explicitly said yes to. The user checks out on
+        kroger.com themselves; this never places or pays for an order."""
+        try:
+            count = await anyio.to_thread.run_sync(
+                kroger.add_to_cart, store, household_id_now(), [{"upc": u, "quantity": 1} for u in upcs], modality
+            )
+        except KrogerError as err:
+            return {"added": 0, "summary": str(err)}
+        noun = "item" if count == 1 else "items"
+        return {"added": count, "summary": f"Added {count} {noun} to your Kroger cart. Check out on kroger.com."}
+
+    @mcp.custom_route("/api/kroger", methods=["GET"])
+    async def kroger_status(_: Request) -> Response:
+        enabled = await anyio.to_thread.run_sync(lambda: kroger.enabled)
+        return JSONResponse({"enabled": enabled, "connected": enabled and kroger.connected(store, household_id_now())})
+
+    @mcp.custom_route("/api/kroger/start", methods=["POST"])
+    async def kroger_start(request: Request) -> Response:
+        base = public_base_url(request)
+        origin = request.headers.get("origin", "")
+        # Come back to the page that asked: the app itself, or the Vite dev server locally.
+        return_to = origin if origin == base or origin.startswith(("http://localhost:", "http://127.0.0.1:")) else ""
+        try:
+            url = await anyio.to_thread.run_sync(
+                kroger.start_sign_in, store, household_id_now(), f"{base}/api/kroger/callback", return_to
+            )
+        except KrogerError as err:
+            return kroger_fail(err)
+        return JSONResponse({"authUrl": url})
+
+    @mcp.custom_route("/api/kroger/callback", methods=["GET"])
+    async def kroger_callback(request: Request) -> Response:
+        """Public: Kroger returns the browser here; the one-time state says whose account it is."""
+        params = request.query_params
+        if error := params.get("error"):
+            reason = params.get("error_description") or error
+            return RedirectResponse("/?connectError=" + urllib.parse.quote(f"Kroger sign-in was cancelled ({reason})."), status_code=303)
+        try:
+            return_to = await anyio.to_thread.run_sync(kroger.finish_sign_in, store, params.get("state", ""), params.get("code", ""))
+        except KrogerError as err:
+            return RedirectResponse("/?connectError=" + urllib.parse.quote(str(err)), status_code=303)
+        return RedirectResponse(f"{return_to}/?connected=kroger", status_code=303)
+
+    @mcp.custom_route("/api/kroger/match", methods=["POST"])
+    async def kroger_match(_: Request) -> Response:
+        names = [g.name for g in store.load(household_id_now()).grocery if not g.checked][:20]
+        if not names:
+            return JSONResponse({"error": "Your grocery list is empty. Add a few items first."}, status_code=400)
+        try:
+            return JSONResponse({"matches": await kroger_matches(names)})
+        except (KrogerError, BaseExceptionGroup) as err:
+            return kroger_fail(err)
+
+    @mcp.custom_route("/api/kroger/cart", methods=["POST"])
+    async def kroger_cart(request: Request) -> Response:
+        """Adds exactly the products the user ticked in the review step."""
+        body = await request.json()
+        modality = "DELIVERY" if body.get("modality") == "DELIVERY" else "PICKUP"
+        try:
+            count = await anyio.to_thread.run_sync(kroger.add_to_cart, store, household_id_now(), body.get("items", []), modality)
+        except KrogerError as err:
+            return kroger_fail(err)
+        return JSONResponse({"added": count, "cartUrl": CART_URL})
+
+    @mcp.custom_route("/api/kroger/disconnect", methods=["POST"])
+    async def kroger_disconnect(_: Request) -> Response:
+        kroger.disconnect(store, household_id_now())
+        return JSONResponse({"enabled": True, "connected": False})
+
+    @mcp.custom_route("/api/grocery", methods=["POST"])
+    async def grocery(request: Request) -> Response:
+        """Direct list edits from the web app: {add: name} | {toggle: id} | {clearChecked: true}."""
+        body = await request.json()
+        hid = household_id_now()
+        household = store.load(hid)
+        if name := str(body.get("add", "")).strip():
+            household.grocery.append(GroceryItem(name=name.capitalize(), source="manual"))
+        elif toggle := body.get("toggle"):
+            for g in household.grocery:
+                if g.id == toggle:
+                    g.checked = not g.checked
+        elif body.get("clearChecked"):
+            household.grocery = [g for g in household.grocery if not g.checked]
+        store.save(hid, household)
+        return state_response()
+
+    @mcp.custom_route("/api/timers/cancel", methods=["POST"])
+    async def cancel_timer(request: Request) -> Response:
+        timer_id = (await request.json()).get("id")
+        hid = household_id_now()
+        household = store.load(hid)
+        household.timers = [t for t in household.timers if t.id != timer_id]
+        store.save(hid, household)
+        return state_response()
+
+    @mcp.custom_route("/health", methods=["GET"])
+    async def health(_: Request) -> Response:
+        tools = await mcp.list_tools()
+        return JSONResponse({
+            "ok": True,
+            "nova": "bedrock" if isinstance(nova, BedrockNova) else "mock",
+            "model": getattr(nova, "model_id", None),
+            "tools": len(tools),
+        })
+
+    behind_cloudfront = bool(os.environ.get("ORIGIN_SECRET"))
+    app_mcp = mcp
+    app = mcp.streamable_http_app(
+        stateless_http=True,
+        json_response=True,
+        # DNS-rebinding protection guards servers on a user's own machine. Behind CloudFront the
+        # Host header is the Lambda URL's, and the origin secret already limits who can call us.
+        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False)
+        if behind_cloudfront
+        else TransportSecuritySettings(
+            allowed_hosts=["localhost:*", "127.0.0.1:*", *_env_list("ALLOWED_HOSTS")],
+            allowed_origins=["http://localhost:*", "http://127.0.0.1:*", *_env_list("ALLOWED_ORIGINS")],
+        ),
+    )
+    # The last middleware added runs first: CORS, origin secret, then the sign-in checks.
+    if auth:
+        key = signing_key or jwks_signing_key(auth)
+        app.add_middleware(
+            BearerAuthMiddleware, verifier=TokenVerifier(auth, key, scopes=ALL_SCOPES), protects=is_mcp_path
+        )
+        if auth.web_client_id:
+            app.add_middleware(
+                BearerAuthMiddleware,
+                verifier=TokenVerifier(auth, key, client_ids={auth.web_client_id}),
+                protects=is_private_api_path,
+            )
+    if behind_cloudfront:
+        app.add_middleware(OriginSecretMiddleware, secret=os.environ["ORIGIN_SECRET"])
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
+        allow_origins=_env_list("ALLOWED_ORIGINS"),
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["mcp-session-id"],
+    )
+    app.state.mcp = app_mcp  # the MCP server itself, for in-process clients and tests
+    return app
