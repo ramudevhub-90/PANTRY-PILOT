@@ -189,6 +189,16 @@ export const api = {
     });
     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? 'Could not start sign-in.');
   },
+  /** A reply spoken by Amazon Polly, as MP3. */
+  speech: async (text: string, lang: string): Promise<Blob> => {
+    const response = await apiFetch('/api/voice/speak', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, lang }),
+    });
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? `Server error ${response.status}`);
+    return response.blob();
+  },
   /** A signed Amazon Transcribe streaming URL for hands-free voice. */
   voiceStream: async (lang: string): Promise<{ url: string }> => {
     const response = await apiFetch(`/api/voice/stream?lang=${encodeURIComponent(lang)}`);

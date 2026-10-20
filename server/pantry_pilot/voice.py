@@ -1,4 +1,4 @@
-"""Hands-free voice: signed Amazon Transcribe streaming URLs for the web app.
+"""Voice: signed Amazon Transcribe streaming URLs for hands-free, and spoken replies from Amazon Polly.
 
 The browser streams microphone audio straight to Amazon Transcribe over a WebSocket and listens for
 "Alexa" in the transcript. That works in every browser, unlike the Web Speech API (missing in
@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import os
 import urllib.parse
+from collections import OrderedDict
+from collections.abc import Callable
 
 import boto3
 from botocore.auth import SigV4QueryAuth
@@ -43,3 +45,49 @@ def stream_url(language: str = "en-US", region: str | None = None) -> str:
     )
     SigV4QueryAuth(credentials.get_frozen_credentials(), "transcribe", region, expires=URL_SECONDS).add_auth(request)
     return "wss://" + request.url.removeprefix("https://")
+
+
+# ---------- Spoken replies: Amazon Polly ----------
+# iPhone Safari's built-in speech often stays silent (blocked, dropped, or routed to the earpiece
+# while the microphone is open). An ordinary MP3 from Polly plays reliably everywhere.
+
+POLLY_VOICES = {"en-IN": "Kajal", "hi-IN": "Kajal", "en-US": "Joanna", "en-GB": "Amy", "en-AU": "Olivia"}
+MAX_SPEECH_CHARS = 1500
+CACHE_ENTRIES = 200
+
+
+class Speaker:
+    """Turns reply text into MP3 with Polly's neural voices. Recent replies are cached per Lambda
+    instance, so a repeated phrase is only paid for once."""
+
+    def __init__(self, synthesize: Callable[[str, str, str], bytes] | None = None) -> None:
+        self._synthesize = synthesize or _polly_synthesize
+        self._cache: OrderedDict[tuple[str, str], bytes] = OrderedDict()
+
+    def speak(self, text: str, language: str = "en-US") -> bytes:
+        text = " ".join(text.split())[:MAX_SPEECH_CHARS]
+        if not text:
+            raise ValueError("Nothing to say.")
+        language = language if language in POLLY_VOICES else "en-US"
+        key = (language, text)
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        audio = self._synthesize(text, POLLY_VOICES[language], "en-IN" if language == "hi-IN" else language)
+        self._cache[key] = audio
+        if len(self._cache) > CACHE_ENTRIES:
+            self._cache.popitem(last=False)
+        return audio
+
+
+_polly = None
+
+
+def _polly_synthesize(text: str, voice_id: str, language: str) -> bytes:
+    global _polly
+    if _polly is None:
+        _polly = boto3.client("polly", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+    response = _polly.synthesize_speech(
+        Text=text, VoiceId=voice_id, LanguageCode=language, Engine="neural", OutputFormat="mp3", SampleRate="24000"
+    )
+    return response["AudioStream"].read()

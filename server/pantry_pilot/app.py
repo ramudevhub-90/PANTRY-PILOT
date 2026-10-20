@@ -73,6 +73,7 @@ def create_app(
     account_directory: AccountDirectory | None = None,
     instacart: Instacart | None = None,
     kroger: Kroger | None = None,
+    speaker: voice.Speaker | None = None,
 ) -> Starlette:
     """`household_id` is the pantry used when nobody is signed in (local development without
     Cognito). With Cognito configured, each signed-in user gets their own pantry."""
@@ -80,6 +81,7 @@ def create_app(
     nova = nova or nova_from_env()
     instacart = instacart or instacart_from_env()
     kroger = kroger or kroger_from_env()
+    speaker = speaker or voice.Speaker()
     default_household = household_id or os.environ.get("HOUSEHOLD_ID", "demo")
     auth = auth or AuthConfig.from_env()
 
@@ -159,6 +161,23 @@ def create_app(
         except voice.VoiceUnavailable as err:
             return JSONResponse({"error": str(err)}, status_code=503)
         return JSONResponse({"url": url, "sampleRate": voice.SAMPLE_RATE})
+
+    @mcp.custom_route("/api/voice/speak", methods=["POST"])
+    async def voice_speak(request: Request) -> Response:
+        """A reply spoken by Amazon Polly, as MP3. Phones play this far more reliably than the
+        browser's own speech."""
+        try:
+            body = await request.json()
+            text, language = str(body.get("text", "")), str(body.get("lang", "en-US"))
+        except (ValueError, AttributeError):
+            return JSONResponse({"error": "Send JSON with text."}, status_code=400)
+        try:
+            audio = await anyio.to_thread.run_sync(speaker.speak, text, language)
+        except ValueError as err:
+            return JSONResponse({"error": str(err)}, status_code=400)
+        except Exception:
+            return JSONResponse({"error": "Speech is unavailable right now."}, status_code=503)
+        return Response(audio, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=3600"})
 
     @mcp.custom_route("/api/turn", methods=["POST"])
     async def turn(request: Request) -> Response:

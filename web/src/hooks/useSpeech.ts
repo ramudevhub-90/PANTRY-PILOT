@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { HAS_SERVER, api } from '../agent/remote';
 import { speechLanguage } from './useHandsFree';
 
 // Minimal typings for the Web Speech API, which TypeScript's DOM lib doesn't fully cover.
@@ -78,14 +79,46 @@ export function useSpeechRecognition(onFinal: (text: string) => void) {
 
 export const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window;
 
-// Phone browsers only let a page talk after the user has tapped it, and replies to hands-free
-// requests arrive with no tap at all. A silent utterance on the first tap unlocks speech for the
-// rest of the visit.
-if (canSpeak) {
+// Replies are spoken by Amazon Polly (an MP3 from the server) when there is one, because iPhone
+// Safari's built-in speech often stays silent. The browser's speech is the fallback.
+const player: HTMLAudioElement | null = HAS_SERVER && typeof Audio !== 'undefined' ? new Audio() : null;
+/** The reply playing now. `stop(false)` silences it without reporting it finished (a new reply replaces it). */
+let current: { stop: (report?: boolean) => void } | null = null;
+
+/** 0.1 s of silence as a WAV file, to play during the first tap. */
+function silentWav(): string {
+  const samples = 800;
+  const view = new DataView(new ArrayBuffer(44 + samples * 2));
+  const text = (offset: number, value: string) => [...value].forEach((c, i) => view.setUint8(offset + i, c.charCodeAt(0)));
+  text(0, 'RIFF');
+  view.setUint32(4, 36 + samples * 2, true);
+  text(8, 'WAVEfmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 8000, true);
+  view.setUint32(28, 16000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  text(36, 'data');
+  view.setUint32(40, samples * 2, true);
+  return URL.createObjectURL(new Blob([view.buffer], { type: 'audio/wav' }));
+}
+
+// Phone browsers only let a page make sound after the user has tapped it, and replies to
+// hands-free requests arrive with no tap at all. Playing silence on the first tap unlocks the
+// audio player (and the browser's speech) for the rest of the visit.
+if (typeof window !== 'undefined') {
   const unlock = () => {
-    const silent = new SpeechSynthesisUtterance(' ');
-    silent.volume = 0;
-    window.speechSynthesis.speak(silent);
+    if (player) {
+      player.src = silentWav();
+      void player.play().catch(() => undefined);
+    }
+    if (canSpeak) {
+      const silent = new SpeechSynthesisUtterance(' ');
+      silent.volume = 0;
+      window.speechSynthesis.speak(silent);
+    }
   };
   window.addEventListener('pointerdown', unlock, { once: true, capture: true });
   window.addEventListener('keydown', unlock, { once: true, capture: true });
@@ -97,9 +130,72 @@ function pickVoice(): SpeechSynthesisVoice | undefined {
   return voices.find((v) => preferred.includes(v.name)) ?? voices.find((v) => v.lang === 'en-US');
 }
 
+/** While the microphone is open (hands-free), iPhones play page audio through the quiet earpiece.
+ * A "playback" audio session sends it to the loudspeaker; returns a function that restores it. */
+function loudspeaker(): () => void {
+  const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+  if (!session) return () => undefined;
+  const previous = session.type;
+  session.type = 'playback';
+  return () => {
+    session.type = previous;
+  };
+}
+
 export function speak(text: string, onEnd: () => void) {
+  current?.stop(false);
+  const restore = loudspeaker();
+  let done = false;
+  const finish = (report = true) => {
+    if (done) return;
+    done = true;
+    current = null;
+    restore();
+    if (report) onEnd();
+  };
+  if (player) speakWithPolly(text, finish);
+  else speakWithBrowser(text, finish);
+}
+
+function speakWithPolly(text: string, finish: (report?: boolean) => void) {
+  const audio = player!;
+  let cancelled = false;
+  let url: string | null = null;
+  const cleanup = () => {
+    audio.onended = audio.onerror = null;
+    if (url) URL.revokeObjectURL(url);
+  };
+  current = {
+    stop: (report = true) => {
+      cancelled = true;
+      audio.pause();
+      cleanup();
+      finish(report);
+    },
+  };
+  const fallback = () => {
+    cleanup();
+    if (!cancelled) speakWithBrowser(text, finish);
+  };
+  api
+    .speech(text, speechLanguage())
+    .then((blob) => {
+      if (cancelled) return;
+      url = URL.createObjectURL(blob);
+      audio.onended = () => {
+        cleanup();
+        finish();
+      };
+      audio.onerror = fallback;
+      audio.src = url;
+      return audio.play();
+    })
+    .catch(fallback);
+}
+
+function speakWithBrowser(text: string, finish: (report?: boolean) => void) {
   if (!canSpeak) {
-    onEnd();
+    finish();
     return;
   }
   const synth = window.speechSynthesis;
@@ -112,28 +208,25 @@ export function speak(text: string, onEnd: () => void) {
   if (voice) utterance.voice = voice;
   utterance.rate = 1.05;
 
-  // While the microphone is open (hands-free), iPhones play page audio through the quiet earpiece.
-  // A "playback" audio session sends it to the loudspeaker; hands-free sends silence meanwhile anyway.
-  const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
-  const previousType = session?.type;
-  if (session) session.type = 'playback';
-
   // Some browsers (and embedded webviews) never fire `end`, so cap it by an estimated duration.
-  let done = false;
-  const finish = () => {
-    if (done) return;
-    done = true;
-    clearTimeout(fallback);
-    if (session && previousType !== undefined) session.type = previousType;
-    onEnd();
-  };
   const fallback = setTimeout(finish, 2000 + text.split(/\s+/).length * 450);
-  utterance.onend = finish;
-  utterance.onerror = finish;
+  const end = (report = true) => {
+    clearTimeout(fallback);
+    finish(report);
+  };
+  current = {
+    stop: (report = true) => {
+      utterance.onend = utterance.onerror = null;
+      synth.cancel();
+      end(report);
+    },
+  };
+  utterance.onend = () => end();
+  utterance.onerror = () => end();
   if (busy) setTimeout(() => synth.speak(utterance), 50);
   else synth.speak(utterance);
 }
 
 export function stopSpeaking() {
-  if (canSpeak) window.speechSynthesis.cancel();
+  current?.stop();
 }

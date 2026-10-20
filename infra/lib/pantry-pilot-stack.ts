@@ -253,6 +253,8 @@ export class PantryPilotStack extends cdk.Stack {
     server.addToRolePolicy(
       new iam.PolicyStatement({ actions: ['transcribe:StartStreamTranscriptionWebSocket'], resources: ['*'] }),
     );
+    // Spoken replies: Amazon Polly reads the assistant's answers aloud (phones play this reliably).
+    server.addToRolePolicy(new iam.PolicyStatement({ actions: ['polly:SynthesizeSpeech'], resources: ['*'] }));
 
     const serverUrl = server.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE,
