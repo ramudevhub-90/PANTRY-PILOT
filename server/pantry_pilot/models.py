@@ -92,11 +92,25 @@ class Meal(ApiModel):
     """breakfast, lunch, dinner, evening snacks... (see mealtime.OCCASIONS)."""
 
 
+Diet = Literal["any", "vegetarian", "eggetarian", "vegan", "jain", "non-vegetarian"]
+
+
+class FoodPreferences(ApiModel):
+    """What the household likes to eat; meal ideas follow it."""
+
+    diet: Diet = "any"
+    cuisines: list[str] = Field(default_factory=list)
+    """e.g. South Indian, Bengali, Italian. Empty: dishes common where the user lives."""
+    avoid: list[str] = Field(default_factory=list)
+    """Ingredients never to use (allergies, dislikes)."""
+
+
 class Household(ApiModel):
     inventory: list[PantryItem] = Field(default_factory=list)
     grocery: list[GroceryItem] = Field(default_factory=list)
     timers: list[KitchenTimer] = Field(default_factory=list)
     meals: list[Meal] = Field(default_factory=list)
+    preferences: FoodPreferences = Field(default_factory=FoodPreferences)
 
 
 _SEED: list[tuple[str, str, float, str, Category, int]] = [

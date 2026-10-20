@@ -2,7 +2,7 @@
 // a full URL in development, or "/" when the server shares the app's domain (CloudFront).
 // Unset, the app runs on the in-browser mock agent.
 import { accessToken, signOut, type AuthSettings } from '../auth/cognito';
-import type { DetectedItem, GroceryItem, KitchenTimer, Meal, PantryItem, ToolCall } from '../types';
+import type { DetectedItem, FoodPreferences, GroceryItem, KitchenTimer, Meal, PantryItem, ToolCall } from '../types';
 import { deviceTimeZone } from '../lib/mealtime';
 
 const configured: string | undefined = import.meta.env.VITE_API_URL;
@@ -15,6 +15,7 @@ export interface ServerState {
   meals: Meal[];
   grocery: GroceryItem[];
   timers: KitchenTimer[];
+  preferences?: FoodPreferences;
 }
 
 /** Detections arrive in the server's snake_case shape. */
@@ -253,4 +254,5 @@ export const api = {
   toggleGrocery: (id: string) => post('/api/grocery', { toggle: id }),
   clearChecked: () => post('/api/grocery', { clearChecked: true }),
   cancelTimer: (id: string) => post('/api/timers/cancel', { id }),
+  setPreferences: (prefs: Partial<FoodPreferences>) => post('/api/preferences', prefs),
 };

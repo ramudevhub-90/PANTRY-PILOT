@@ -37,6 +37,7 @@ def test_lists_all_tools_with_read_only_hints(store):
         "update_inventory": False,
         "scan_pantry": True,
         "plan_meals": False,
+        "set_food_preferences": False,
         "build_grocery_list": False,
         "get_grocery_list": True,
         "set_timer": False,

@@ -10,14 +10,23 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .models import Meal, MealTimer, PantryItem
+from .models import FoodPreferences, Meal, MealTimer, PantryItem
 
 SUGGEST_PROMPT = """You are a home cook planning {occasion} from this household's pantry.
-Suggest {count} different dishes that suit {occasion}. Use up food that expires soonest first, prefer
-dishes that need nothing or very little that isn't in the pantry, and assume basic staples (salt,
-water, cooking oil) are always available. Indian home cooking is welcome alongside other cuisines.
-Keep steps short and practical: 3 to 6 steps.
+Suggest {count} different dishes that suit {occasion} and are commonly cooked at home where the
+household lives (their time zone is {zone}), unless they prefer other cuisines. Strictly follow their
+diet and never use ingredients they avoid. Use up food that expires soonest first, prefer dishes that
+need nothing or very little that isn't in the pantry, and assume basic staples (salt, water, cooking
+oil, common spices for the cuisine) are available. Keep steps short and practical: 3 to 6 steps.
 Report the dishes with the suggest_meals tool."""
+
+DIET_RULES = {
+    "vegetarian": "vegetarian: no meat, poultry, fish or eggs (dairy is fine)",
+    "eggetarian": "vegetarian plus eggs: no meat, poultry or fish",
+    "vegan": "vegan: no animal products at all, including dairy, eggs and honey",
+    "jain": "Jain: vegetarian, no eggs, and no onion, garlic, potatoes or other root vegetables",
+    "non-vegetarian": "non-vegetarian: meat, fish and eggs are all welcome",
+}
 
 SUGGEST_TOOL: dict[str, Any] = {
     "toolSpec": {
@@ -62,20 +71,39 @@ SUGGEST_TOOL: dict[str, Any] = {
 
 
 def suggest_request(
-    inventory: list[PantryItem], occasion: str, count: int, wish: str | None, avoid: list[str]
+    inventory: list[PantryItem],
+    occasion: str,
+    count: int,
+    wish: str | None,
+    avoid: list[str],
+    preferences: FoodPreferences | None = None,
+    zone: str = "Asia/Kolkata",
 ) -> tuple[str, str]:
     """The system prompt and user message for Nova."""
+    preferences = preferences or FoodPreferences()
     lines = [
         f"- {i.name}: {i.quantity:g} {i.unit}, " + ("expired" if i.days_left < 0 else f"expires in {i.days_left} days")
         for i in sorted(inventory, key=lambda i: i.days_left)
-        if i.days_left >= 0
+        if i.days_left >= 0 and not avoided(i.name, preferences)
     ]
-    text = "Pantry:\n" + ("\n".join(lines) or "- (empty)")
+    text ="Pantry:\n" + ("\n".join(lines) or "- (empty)")
+    if preferences.diet in DIET_RULES:
+        text += f"\n\nDiet: {DIET_RULES[preferences.diet]}."
+    if preferences.cuisines:
+        text += "\nFavourite cuisines: " + ", ".join(preferences.cuisines)
+    if preferences.avoid:
+        text += "\nNever use: " + ", ".join(preferences.avoid)
     if wish:
         text += f"\n\nThe user asked for: {wish}"
     if avoid:
         text += "\n\nAlready suggested, so pick different dishes: " + ", ".join(avoid)
-    return SUGGEST_PROMPT.format(occasion=occasion, count=count), text
+    return SUGGEST_PROMPT.format(occasion=occasion, count=count, zone=zone), text
+
+
+def avoided(name: str, preferences: FoodPreferences) -> bool:
+    """The item contains an ingredient the household never wants."""
+    lower = name.lower()
+    return any(a.lower() in lower for a in preferences.avoid if a.strip())
 
 
 def _slug(name: str) -> str:
@@ -95,14 +123,21 @@ def _pantry_item(inventory: list[PantryItem], name: str) -> PantryItem | None:
     )
 
 
-def to_meals(raw: list[dict[str, Any]], inventory: list[PantryItem], limit: int) -> list[Meal]:
-    """Nova's dishes as Meals, with `uses` and `rescues` checked against the real pantry."""
+def to_meals(
+    raw: list[dict[str, Any]], inventory: list[PantryItem], limit: int, preferences: FoodPreferences | None = None
+) -> list[Meal]:
+    """Nova's dishes as Meals, with `uses` and `rescues` checked against the real pantry. Dishes
+    that use an ingredient the household avoids are dropped."""
+    preferences = preferences or FoodPreferences()
     meals: list[Meal] = []
     seen: set[str] = set()
     for dish in raw:
         name = str(dish.get("name", "")).strip()
         steps = [str(s).strip() for s in dish.get("steps") or [] if str(s).strip()][:6]
         if not name or not steps or _slug(name) in seen:
+            continue
+        mentioned = [name, *map(str, dish.get("uses") or []), *map(str, dish.get("missing") or [])]
+        if any(avoided(m, preferences) for m in mentioned):
             continue
         uses: list[PantryItem] = []
         for wanted in dish.get("uses") or []:
@@ -141,3 +176,22 @@ def to_meals(raw: list[dict[str, Any]], inventory: list[PantryItem], limit: int)
         if len(meals) == limit:
             break
     return meals
+
+
+_MEAT = ("chicken", "mutton", "lamb", "beef", "pork", "fish", "prawn", "shrimp", "meat", "bacon", "ham", "sausage")
+_EGG = ("egg",)
+_ANIMAL = (*_MEAT, *_EGG, "milk", "yogurt", "curd", "paneer", "cheese", "cheddar", "parmesan", "butter", "ghee", "cream", "honey")
+_ROOTS = ("onion", "garlic", "potato", "carrot", "beetroot", "radish", "ginger")
+_FORBIDDEN: dict[str, tuple[str, ...]] = {
+    "vegetarian": (*_MEAT, *_EGG),
+    "eggetarian": _MEAT,
+    "vegan": _ANIMAL,
+    "jain": (*_MEAT, *_EGG, *_ROOTS),
+}
+
+
+def suits(meal: Meal, preferences: FoodPreferences) -> bool:
+    """For the built-in recipes: no ingredient the diet or the household rules out."""
+    names = [meal.name, *meal.uses, *meal.missing]
+    banned = _FORBIDDEN.get(preferences.diet, ())
+    return not any(b in n.lower() for n in names for b in banned) and not any(avoided(n, preferences) for n in names)

@@ -1,5 +1,6 @@
 import { Clock, Leaf, RefreshCw, ShoppingBasket, Timer, Users, UtensilsCrossed } from 'lucide-react';
 import { useAssistant } from '../agent/useAssistant';
+import { FoodPreferences } from './FoodPreferences';
 import { joinNames, lower } from '../lib/format';
 import { currentOccasion, planTitle } from '../lib/mealtime';
 import { usePantry } from '../state/store';
@@ -25,6 +26,7 @@ export function MealPlanCard() {
           </button>
         )}
       </header>
+      <FoodPreferences />
 
       {!top ? (
         <div className="empty">

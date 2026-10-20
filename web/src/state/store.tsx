@@ -6,6 +6,7 @@ import type {
   AssistantMode,
   ChatMessage,
   DetectedItem,
+  FoodPreferences,
   GroceryItem,
   KitchenTimer,
   Meal,
@@ -19,6 +20,7 @@ export interface PantryState {
   meals: Meal[];
   grocery: GroceryItem[];
   timers: KitchenTimer[];
+  preferences: FoodPreferences;
   messages: ChatMessage[];
   mode: AssistantMode;
   voiceReplies: boolean;
@@ -57,6 +59,7 @@ function initialState(): PantryState {
     meals: [],
     grocery: [],
     timers: [],
+    preferences: { diet: 'any', cuisines: [], avoid: [] },
     messages: [],
     mode: 'idle',
     voiceReplies: true,
@@ -82,7 +85,12 @@ function reducer(state: PantryState, action: Action): PantryState {
           return !prev || prev.quantity !== i.quantity || prev.expiresOn !== i.expiresOn;
         })
         .map((i) => i.id);
-      return { ...state, ...action.state, highlight: state.inventory.length ? changed : [] };
+      return {
+        ...state,
+        ...action.state,
+        preferences: action.state.preferences ?? state.preferences,
+        highlight: state.inventory.length ? changed : [],
+      };
     }
     case 'add_stock': {
       const inventory = [...state.inventory];

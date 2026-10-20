@@ -93,3 +93,12 @@ export interface ChatMessage {
 }
 
 export type AssistantMode = 'idle' | 'listening' | 'thinking' | 'speaking';
+
+export type Diet = 'any' | 'vegetarian' | 'eggetarian' | 'vegan' | 'jain' | 'non-vegetarian';
+
+/** What the household eats; meal ideas follow it (server/pantry_pilot/models.py FoodPreferences). */
+export interface FoodPreferences {
+  diet: Diet;
+  cuisines: string[];
+  avoid: string[];
+}

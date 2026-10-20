@@ -111,3 +111,36 @@ def test_timezone_header_sets_the_request_zone():
         assert client.get("/", headers={"X-Timezone": "Asia/Kolkata"}).json() == {"zone": "Asia/Kolkata"}
         assert client.get("/", headers={"X-Timezone": "Not/AZone"}).json() == {"zone": None}
         assert client.get("/").json() == {"zone": None}
+
+
+def call_tool(store, name, args):
+    async def run():
+        async with Client(create_server(store, MockNova(), lambda: "test")) as client:
+            result = await client.call_tool(name, args)
+            assert not result.is_error, result.content
+            return result.structured_content
+
+    return anyio.run(run)
+
+
+def test_preferences_are_saved_and_sent_to_nova():
+    store = MemoryStore()
+    saved = call_tool(store, "set_food_preferences", {"diet": "vegetarian", "cuisines": ["South Indian"], "avoid": ["mushroom"]})
+    assert saved["summary"] == "Saved: vegetarian · South Indian · no mushroom"
+    call_tool(store, "set_food_preferences", {"cuisines": []})  # other fields stay
+    prefs = store.load("test").preferences
+    assert (prefs.diet, prefs.cuisines, prefs.avoid) == ("vegetarian", [], ["mushroom"])
+
+    nova = IdeasNova([[{**POHA, "name": "Mushroom Poha"}, POHA]])
+    result = plan(store, nova, {"meal": "breakfast"}, zone="Asia/Kolkata")
+    system, request = nova.requests[0]
+    assert "Asia/Kolkata" in system
+    assert "no meat, poultry, fish or eggs" in request and "Never use: mushroom" in request
+    assert [m["name"] for m in result["meals"]] == ["Poha"]  # the mushroom dish is dropped
+
+
+def test_recipe_fallback_respects_diet():
+    store = MemoryStore()
+    call_tool(store, "set_food_preferences", {"diet": "vegetarian"})
+    names = [m["name"] for m in plan(store, MockNova(), {"meal": "dinner"})["meals"]]
+    assert names and not any("Chicken" in n or "Frittata" in n or "Fried Rice" in n for n in names)

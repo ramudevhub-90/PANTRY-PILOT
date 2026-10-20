@@ -12,9 +12,9 @@ from mcp.server.mcpserver import MCPServer
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel
 
-from .meal_ideas import suggest_request, to_meals
-from .mealtime import current_occasion
-from .models import Category, GroceryItem, Household, KitchenTimer, PantryItem
+from .meal_ideas import suggest_request, suits, to_meals
+from .mealtime import current_occasion, local_now
+from .models import Category, Diet, GroceryItem, Household, KitchenTimer, PantryItem
 from .nova import Nova, parse_data_url
 from .recipes import RECIPES, plan_meals
 from .store import Store
@@ -24,6 +24,7 @@ what to cook, the grocery list and kitchen timers.
 - Call get_inventory before answering questions about what's in the kitchen.
 - For "what can I make", call plan_meals; it favours food that is about to expire and picks the
   meal (breakfast, lunch, dinner, snacks...) from the user's local time unless one is named.
+- When the user states a diet, favourite cuisines or foods to avoid, call set_food_preferences.
 - When the user buys, uses or finishes food, call update_inventory.
 - scan_pantry only reads photos, videos or bills and returns detections; save them with
   update_inventory(action="add") after the user confirms."""
@@ -243,22 +244,25 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
         occasion = meal or current_occasion()
         count = max(1, min(limit, 5))
         avoid = [m.name for m in household.meals]
-        system, text = suggest_request(household.inventory, occasion, count, request, avoid)
+        prefs = household.preferences
+        zone = str(local_now().tzinfo)
+        system, text = suggest_request(household.inventory, occasion, count, request, avoid, prefs, zone)
         try:
             raw = await anyio.to_thread.run_sync(nova.suggest_meals, system, text)
-            meals = to_meals(raw, household.inventory, count)
+            meals = to_meals(raw, household.inventory, count, prefs)
         except Exception:
             meals = []
         source = "Amazon Nova"
         if not meals:
-            meals = plan_meals(household.inventory, limit=count)
+            meals = [m for m in plan_meals(household.inventory, limit=len(RECIPES)) if suits(m, prefs)][:count]
             source = f"{len(RECIPES)} built-in recipes"
         for m in meals:
             m.occasion = occasion
         household.meals = meals
         save(household)
         return {
-            "summary": f"{occasion.capitalize()} ideas from {source} · top pick: {meals[0].name}",
+            "summary": f"{occasion.capitalize()} ideas from {source} · "
+            + (f"top pick: {meals[0].name}" if meals else "nothing fits right now"),
             "occasion": occasion,
             "meals": [
                 {
@@ -275,6 +279,32 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
                 for m in meals
             ],
         }
+
+    @mcp.tool(title="Set food preferences")
+    def set_food_preferences(
+        diet: Diet | None = None,
+        cuisines: list[str] | None = None,
+        avoid: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Remember what the household eats, so meal ideas follow it: diet ("we're vegetarian",
+        "we eat eggs but no meat" = eggetarian, "Jain"), favourite cuisines ("we like South Indian
+        food") and ingredients to avoid (allergies, dislikes). Only the fields given change; pass an
+        empty list to clear cuisines or avoid."""
+        household = load()
+        prefs = household.preferences
+        if diet is not None:
+            prefs.diet = diet
+        if cuisines is not None:
+            prefs.cuisines = [c.strip() for c in cuisines if c.strip()][:6]
+        if avoid is not None:
+            prefs.avoid = [a.strip() for a in avoid if a.strip()][:12]
+        save(household)
+        parts = [prefs.diet if prefs.diet != "any" else "any diet"]
+        if prefs.cuisines:
+            parts.append(", ".join(prefs.cuisines))
+        if prefs.avoid:
+            parts.append("no " + ", ".join(prefs.avoid))
+        return {"summary": "Saved: " + " · ".join(parts), "preferences": prefs.model_dump(by_alias=True)}
 
     @mcp.tool(title="Add to the grocery list")
     def build_grocery_list(items: list[str] | None = None, meal_id: str | None = None) -> dict[str, Any]:

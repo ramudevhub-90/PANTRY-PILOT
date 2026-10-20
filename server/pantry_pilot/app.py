@@ -283,6 +283,17 @@ def create_app(
             return JSONResponse({"error": "Couldn't add that item"}, status_code=400)
         return state_response()
 
+    @mcp.custom_route("/api/preferences", methods=["POST"])
+    async def set_preferences(request: Request) -> Response:
+        """Food preferences from the dashboard: {diet?, cuisines?, avoid?}. Same MCP tool as voice."""
+        body = await request.json()
+        args = {k: body[k] for k in ("diet", "cuisines", "avoid") if k in body}
+        async with Client(mcp) as client:
+            result = await client.call_tool("set_food_preferences", args)
+        if result.is_error:
+            return JSONResponse({"error": "Couldn't save those preferences"}, status_code=400)
+        return state_response()
+
     # ---------- Grocery-app connectors (Swiggy Instamart, Zepto); see connectors.py ----------
 
     async def import_orders(provider_id: str) -> dict[str, Any]:
