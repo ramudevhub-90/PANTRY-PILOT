@@ -2144,3 +2144,11 @@ p {
   align-items: center;
   gap: 12px;
 }
+.prefs__place {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 6px;
+  color: var(--accent);
+  font-weight: 600;
+}

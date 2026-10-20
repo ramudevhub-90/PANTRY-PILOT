@@ -36,3 +36,20 @@ const TITLES: Record<string, string> = {
 export function planTitle(occasion: string): string {
   return TITLES[occasion] ?? 'Meal plan';
 }
+
+// Same places the server tells Nova (server/pantry_pilot/meal_ideas.py place_for).
+const PLACES: Record<string, string> = {
+  'Asia/Kolkata': 'India',
+  'Asia/Calcutta': 'India',
+  'Asia/Dubai': 'UAE',
+  'Asia/Singapore': 'Singapore',
+  'Europe/London': 'UK',
+};
+const US_ZONES = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix'];
+
+/** Where meal ideas are aimed: a country name, or the time zone itself when we don't map it. */
+export function placeForZone(zone: string): string {
+  if (PLACES[zone]) return PLACES[zone];
+  if (US_ZONES.some((z) => zone.startsWith(z))) return 'United States';
+  return zone || 'India';
+}

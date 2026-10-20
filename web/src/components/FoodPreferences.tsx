@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { SlidersHorizontal } from 'lucide-react';
+import { MapPin, SlidersHorizontal } from 'lucide-react';
 import { HAS_SERVER, api } from '../agent/remote';
+import { deviceTimeZone, placeForZone } from '../lib/mealtime';
 import { usePantry } from '../state/store';
 import type { Diet } from '../types';
 
@@ -31,6 +32,8 @@ export function FoodPreferences() {
   const [error, setError] = useState<string | null>(null);
 
   if (!HAS_SERVER) return null;
+
+  const place = placeForZone(deviceTimeZone);
 
   const label = DIETS.find((d) => d.value === prefs.diet)?.label ?? 'Any diet';
   const summary = [
@@ -65,6 +68,11 @@ export function FoodPreferences() {
   if (!editing) {
     return (
       <p className="prefs muted small-print">
+        <span className="prefs__place" title={`Dishes common in ${place}, from your device's time zone`}>
+          <MapPin size={13} aria-hidden="true" />
+          {place}
+          {deviceTimeZone && place !== deviceTimeZone ? ` (${deviceTimeZone})` : ''}
+        </span>
         <SlidersHorizontal size={13} aria-hidden="true" />
         <span>{summary}</span>
         <button type="button" className="link-btn" onClick={open}>
