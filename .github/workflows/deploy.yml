@@ -5,10 +5,8 @@
 #
 # Repository settings (Settings → Secrets and variables → Actions):
 #   Secret   ORIGIN_SECRET       value of infra/.origin-secret (lets CloudFront reach the server)
-#   Variable AWS_DEPLOY_ROLE_ARN role GitHub assumes to deploy
-#   Variable DOMAIN              e.g. trypantrypilot.com
-#   Variable SES_ROLE_ARN        role that sends sign-in codes (optional)
-#   Variable NOVA_ROLE_ARN       role used to call Amazon Nova (optional)
+# Optional variables override the defaults below (role ARNs and the domain are IDs, not secrets):
+#   AWS_DEPLOY_ROLE_ARN, DOMAIN, SES_ROLE_ARN, NOVA_ROLE_ARN
 
 name: Deploy
 
@@ -95,15 +93,15 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN || 'arn:aws:iam::992189742260:role/PantryPilotGitHubDeploy' }}
           aws-region: us-east-1
 
       - name: Deploy
         working-directory: infra
         env:
-          DOMAIN: ${{ vars.DOMAIN }}
-          SES_ROLE_ARN: ${{ vars.SES_ROLE_ARN }}
-          NOVA_ROLE_ARN: ${{ vars.NOVA_ROLE_ARN }}
+          DOMAIN: ${{ vars.DOMAIN || 'trypantrypilot.com' }}
+          SES_ROLE_ARN: ${{ vars.SES_ROLE_ARN || 'arn:aws:iam::975138397215:role/PantryPilotSesSender' }}
+          NOVA_ROLE_ARN: ${{ vars.NOVA_ROLE_ARN || 'arn:aws:iam::234951664889:role/PantryPilotBedrockAccess' }}
         run: |
           args=()
           [ -n "$DOMAIN" ] && args+=(-c "domain=$DOMAIN")
