@@ -265,6 +265,17 @@ export function useHandsFree(onCommand: (text: string) => void, paused: boolean)
     [armCommandTimer, armIdleTimer, connect, setPhase, stop],
   );
 
+  // iPhones may end the microphone while a reply plays through the loudspeaker; reopen it afterwards.
+  useEffect(() => {
+    if (paused || !activeRef.current) return;
+    const audio = audioRef.current;
+    if (audio && audio.stream.getAudioTracks().some((t) => t.readyState === 'ended')) {
+      const mode = modeRef.current;
+      stop();
+      void start(mode);
+    }
+  }, [paused, start, stop]);
+
   useEffect(() => () => stop(), [stop]);
 
   return { supported: handsFreeSupported, phase, interim, error, start, stop };

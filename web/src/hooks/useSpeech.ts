@@ -102,11 +102,21 @@ export function speak(text: string, onEnd: () => void) {
     onEnd();
     return;
   }
-  window.speechSynthesis.cancel();
+  const synth = window.speechSynthesis;
+  // Safari silently drops an utterance queued right after cancel(), so only cancel when something
+  // is actually playing, and queue the reply on the next tick.
+  const busy = synth.speaking || synth.pending;
+  if (busy) synth.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   const voice = pickVoice();
   if (voice) utterance.voice = voice;
   utterance.rate = 1.05;
+
+  // While the microphone is open (hands-free), iPhones play page audio through the quiet earpiece.
+  // A "playback" audio session sends it to the loudspeaker; hands-free sends silence meanwhile anyway.
+  const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+  const previousType = session?.type;
+  if (session) session.type = 'playback';
 
   // Some browsers (and embedded webviews) never fire `end`, so cap it by an estimated duration.
   let done = false;
@@ -114,12 +124,14 @@ export function speak(text: string, onEnd: () => void) {
     if (done) return;
     done = true;
     clearTimeout(fallback);
+    if (session && previousType !== undefined) session.type = previousType;
     onEnd();
   };
   const fallback = setTimeout(finish, 2000 + text.split(/\s+/).length * 450);
   utterance.onend = finish;
   utterance.onerror = finish;
-  window.speechSynthesis.speak(utterance);
+  if (busy) setTimeout(() => synth.speak(utterance), 50);
+  else synth.speak(utterance);
 }
 
 export function stopSpeaking() {
