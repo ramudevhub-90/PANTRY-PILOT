@@ -10,6 +10,12 @@ const NOT_A_CALLBACK =
 const touchScreen = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
 const looksLikeCallback =(text: string) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/callback\?.*code=/.test(text.trim());
 
+function connectedNote(name: string, hasOrders: boolean): string {
+  return hasOrders
+    ? `${name} connected. Tap Sync orders to import your recent orders.`
+    : `${name} connected. Pantry Pilot can now compare its prices and fill your cart.`;
+}
+
 function ago(epochSeconds: number | null): string {
   if (!epochSeconds) return 'never synced';
   const minutes = Math.round((Date.now() / 1000 - epochSeconds) / 60);
@@ -55,8 +61,9 @@ export function ConnectorsCard() {
     else if (connectedId === 'kroger') {
       setMessage({ tone: 'ok', text: 'Kroger connected. Use “Add to Kroger cart” on your grocery list.' });
     } else {
-      const name = connectedId === 'swiggy' ? 'Swiggy Instamart' : connectedId === 'zepto' ? 'Zepto' : 'The app';
-      setMessage({ tone: 'ok', text: `${name} connected. Tap Sync orders to import your recent orders.` });
+      const name =
+        connectedId === 'swiggy' ? 'Swiggy Instamart' : connectedId === 'zepto' ? 'Zepto' : connectedId === 'bigbasket' ? 'BigBasket' : 'The app';
+      setMessage({ tone: 'ok', text: connectedNote(name, connectedId !== 'bigbasket') });
     }
     window.history.replaceState(null, '', window.location.pathname);
   }, []);
@@ -96,7 +103,7 @@ export function ConnectorsCard() {
     setConnectors(res.connectors.filter((c) => availableHere(c.id)));
     setConnecting(null);
     setPasted('');
-    setMessage({ tone: 'ok', text: `${c.name} connected. Tap Sync orders to import your recent orders.` });
+    setMessage({ tone: 'ok', text: connectedNote(c.name, c.hasOrders) });
   }
 
   const finish = (c: Connector, address: string) => act(`finish-${c.id}`, () => complete(c, address));
@@ -144,17 +151,23 @@ export function ConnectorsCard() {
               <div className="app-row__main">
                 <strong>{c.name}</strong>
                 <span className="muted">
-                  {c.connected
-                    ? `Connected · ${ago(c.lastSync)}${c.importedOrders ? ` · ${c.importedOrders} orders imported` : ''}`
-                    : 'Not connected'}
+                  {!c.connected
+                    ? c.hasOrders
+                      ? 'Not connected'
+                      : 'Not connected · prices and cart'
+                    : c.hasOrders
+                      ? `Connected · ${ago(c.lastSync)}${c.importedOrders ? ` · ${c.importedOrders} orders imported` : ''}`
+                      : 'Connected · prices and cart (you check out on BigBasket)'}
                 </span>
               </div>
               {c.connected ? (
                 <div className="app-row__actions">
-                  <button type="button" className="btn btn--sm" onClick={() => sync(c)} disabled={busy !== null}>
-                    <RefreshCw size={14} className={busy === `sync-${c.id}` ? 'spin' : undefined} />
-                    Sync orders
-                  </button>
+                  {c.hasOrders && (
+                    <button type="button" className="btn btn--sm" onClick={() => sync(c)} disabled={busy !== null}>
+                      <RefreshCw size={14} className={busy === `sync-${c.id}` ? 'spin' : undefined} />
+                      Sync orders
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="icon-btn"

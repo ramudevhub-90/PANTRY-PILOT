@@ -20,6 +20,7 @@ export const userRegion: Region | null = detect();
 export const APP_REGION: Record<string, Region> = {
   swiggy: 'IN',
   zepto: 'IN',
+  bigbasket: 'IN',
   kroger: 'US',
   instacart: 'US',
 };

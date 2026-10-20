@@ -110,7 +110,7 @@ export interface NewPantryItem {
 }
 
 export interface Connector {
-  id: 'zepto' | 'swiggy';
+  id: 'zepto' | 'swiggy' | 'bigbasket';
   name: string;
   connected: boolean;
   /** Sign-in returns straight to the app (/api/connectors/{id}/callback); no pasting. */
@@ -120,6 +120,8 @@ export interface Connector {
   /** Epoch seconds. */
   lastSync: number | null;
   importedOrders: number;
+  /** Shares order history to import (BigBasket doesn't: search and cart only). */
+  hasOrders: boolean;
 }
 
 interface ConnectorResponse {

@@ -135,7 +135,7 @@ def fake_oauth(monkeypatch):
 def test_sign_in_uses_pkce_and_finishes_from_the_pasted_address(fake_oauth):
     store = MemoryStore()
     url = urllib.parse.urlparse(connectors.start_sign_in(store, "alice", ZEPTO))
-    assert [r["pending"] for r in connectors.status(store, "alice")] == [True, False]
+    assert [r["pending"] for r in connectors.status(store, "alice")] == [True, False, False]
     query = dict(urllib.parse.parse_qsl(url.query))
     assert url.netloc == "auth.example"
     assert query["client_id"] == "pp-client" and query["redirect_uri"] == "http://localhost/callback"
@@ -151,8 +151,8 @@ def test_sign_in_uses_pkce_and_finishes_from_the_pasted_address(fake_oauth):
     token_request = fake_oauth[-1][1]
     assert token_request["code"] == "the-code" and len(token_request["code_verifier"]) > 40
     assert connectors.access_token(store, "alice", ZEPTO) == "new-tok"
-    assert [r["connected"] for r in connectors.status(store, "alice")] == [True, False]
-    assert [r["pending"] for r in connectors.status(store, "alice")] == [False, False]
+    assert [r["connected"] for r in connectors.status(store, "alice")] == [True, False, False]
+    assert [r["pending"] for r in connectors.status(store, "alice")] == [False, False, False]
 
 
 def test_swiggy_returns_straight_to_the_app(fake_oauth, monkeypatch):

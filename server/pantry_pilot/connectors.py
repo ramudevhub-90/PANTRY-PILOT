@@ -53,6 +53,8 @@ class Provider:
     direct_return: bool = False
     """The provider accepts our own https callback, so sign-in returns straight to the app.
     Otherwise it only allows http://localhost/callback and the user pastes that address back."""
+    has_orders: bool = True
+    """Shares order history to import. BigBasket doesn't: search and cart only."""
 
 
 PROVIDERS: dict[str, Provider] = {
@@ -78,6 +80,14 @@ PROVIDERS: dict[str, Provider] = {
         read_tools=frozenset({"get_orders"}),
         # Swiggy's allowlist (GET mcp.swiggy.com/auth/check-redirect-uri) accepts http://localhost/callback
         # but not our domain until Swiggy approves it; set direct_return=True once it does.
+    ),
+    "bigbasket": Provider(
+        id="bigbasket",
+        name="BigBasket",
+        mcp_url="https://mcp.bigbasket.com/mcp",
+        scope="read write cart products",  # search and cart; BigBasket's MCP can't place orders
+        read_tools=frozenset(),
+        has_orders=False,
     ),
 }
 
@@ -337,6 +347,7 @@ def status(store: Store, user: str, app_url: str | None = None) -> list[dict[str
             "pending": not direct and bool(pending) and time.time() - pending["created"] < PENDING_SECONDS,
             "lastSync": saved.get("last_sync") if saved else None,
             "importedOrders": len(synced.get("order_ids", [])),
+            "hasOrders": p.has_orders,
         })
     return rows
 
@@ -438,6 +449,8 @@ async def sync_orders(
     store: Store, user: str, provider: Provider, nova: Nova, client_factory: ClientFactory = remote_client
 ) -> SyncResult:
     """New delivered orders since the last sync, merged into one item list (not yet saved)."""
+    if not provider.has_orders:
+        raise ConnectorError(f"{provider.name} doesn't share order history.")
     token = await anyio.to_thread.run_sync(access_token, store, user, provider)
     synced = store.load_record(_synced_key(user, provider)) or {"order_ids": []}
     seen = set(synced["order_ids"])
