@@ -55,6 +55,9 @@ class Provider:
     Otherwise it only allows http://localhost/callback and the user pastes that address back."""
     has_orders: bool = True
     """Shares order history to import. BigBasket doesn't: search and cart only."""
+    token_auth: str = "none"
+    """How the app proves itself at the token endpoint. Most accept a public client ("none");
+    BigBasket requires a client secret ("client_secret_post")."""
 
 
 PROVIDERS: dict[str, Provider] = {
@@ -88,6 +91,7 @@ PROVIDERS: dict[str, Provider] = {
         scope="read write cart products",  # search and cart; BigBasket's MCP can't place orders
         read_tools=frozenset(),
         has_orders=False,
+        token_auth="client_secret_post",
     ),
 }
 
@@ -110,6 +114,8 @@ def _client_key(provider: Provider, redirect_uri: str) -> str:
     suffix = "" if redirect_uri == REDIRECT_URI else "#" + hashlib.sha256(redirect_uri.encode()).hexdigest()[:12]
     if provider.scope and provider.scope != _FIRST_SCOPES.get(provider.id):
         suffix += "#scope-" + hashlib.sha256(provider.scope.encode()).hexdigest()[:8]
+    if provider.token_auth != "none":
+        suffix += "#" + provider.token_auth
     return f"oauth-client#{provider.id}{suffix}"
 
 
@@ -198,13 +204,15 @@ def _registered_client(store: Store, provider: Provider, redirect_uri: str = RED
             "redirect_uris": [redirect_uri],
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],
-            "token_endpoint_auth_method": "none",
+            "token_endpoint_auth_method": provider.token_auth,
             **({"scope": provider.scope} if provider.scope else {}),
         },
         as_json=True,
     )
     if status >= 400 or "client_id" not in reg:
         raise ConnectorError(f"{provider.name} refused to register Pantry Pilot ({reg.get('error', status)}).")
+    if provider.token_auth != "none" and not reg.get("client_secret"):
+        raise ConnectorError(f"{provider.name} didn't give Pantry Pilot the key it needs to connect. Try again later.")
     client = {
         "client_id": reg["client_id"],
         "client_secret": reg.get("client_secret"),

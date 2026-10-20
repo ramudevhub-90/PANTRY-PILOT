@@ -264,3 +264,27 @@ def test_tool_catalog_lists_names_without_user_data(fake_oauth):
     assert [t["name"] for t in catalog] == ["search_catalog", "update_cart"]
     assert catalog[1]["args"] == ["cart_id", "items"] and catalog[1]["required"] == ["items"]
     assert store.load_record("tool-catalog#zepto")["tools"] == catalog
+
+
+def test_bigbasket_registers_as_a_confidential_client_and_sends_its_secret(monkeypatch):
+    posts = []
+    monkeypatch.setattr(connectors, "discover", lambda provider: {
+        "authorization_endpoint": "https://bb.example/authorize",
+        "token_endpoint": "https://bb.example/token",
+        "registration_endpoint": "https://bb.example/register",
+    })
+
+    def post(url, data, as_json=False):
+        posts.append((url, data))
+        if url.endswith("/register"):
+            return 201, {"client_id": "bb-client", "client_secret": "bb-secret"}
+        return 200, {"access_token": "tok", "expires_in": 3600}
+
+    monkeypatch.setattr(connectors, "_post", post)
+    store = MemoryStore()
+    bigbasket = connectors.PROVIDERS["bigbasket"]
+    url = urllib.parse.urlparse(connectors.start_sign_in(store, "alice", bigbasket))
+    state = dict(urllib.parse.parse_qsl(url.query))["state"]
+    connectors.finish_sign_in(store, "alice", bigbasket, f"http://localhost/callback?code=c&state={state}")
+    assert posts[0][1]["token_endpoint_auth_method"] == "client_secret_post"
+    assert posts[-1][1]["client_secret"] == "bb-secret"
