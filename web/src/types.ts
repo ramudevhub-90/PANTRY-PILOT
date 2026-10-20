@@ -101,4 +101,6 @@ export interface FoodPreferences {
   diet: Diet;
   cuisines: string[];
   avoid: string[];
+  /** City and region, e.g. "Bengaluru, Karnataka, India"; empty means the time zone's country. */
+  location: string;
 }

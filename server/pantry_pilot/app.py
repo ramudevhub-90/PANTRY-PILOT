@@ -298,7 +298,7 @@ def create_app(
     async def set_preferences(request: Request) -> Response:
         """Food preferences from the dashboard: {diet?, cuisines?, avoid?}. Same MCP tool as voice."""
         body = await request.json()
-        args = {k: body[k] for k in ("diet", "cuisines", "avoid") if k in body}
+        args = {k: body[k] for k in ("diet", "cuisines", "avoid", "location") if k in body}
         async with Client(mcp) as client:
             result = await client.call_tool("set_food_preferences", args)
         if result.is_error:

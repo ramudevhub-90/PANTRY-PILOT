@@ -103,6 +103,8 @@ class FoodPreferences(ApiModel):
     """e.g. South Indian, Bengali, Italian. Empty: dishes common where the user lives."""
     avoid: list[str] = Field(default_factory=list)
     """Ingredients never to use (allergies, dislikes)."""
+    location: str = ""
+    """City and region, e.g. "Bengaluru, Karnataka, India". Empty: the country from the time zone."""
 
 
 class Household(ApiModel):

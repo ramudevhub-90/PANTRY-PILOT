@@ -293,11 +293,13 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
         diet: Diet | None = None,
         cuisines: list[str] | None = None,
         avoid: list[str] | None = None,
+        location: str | None = None,
     ) -> dict[str, Any]:
         """Remember what the household eats, so meal ideas follow it: diet ("we're vegetarian",
         "we eat eggs but no meat" = eggetarian, "Jain"), favourite cuisines ("we like South Indian
-        food") and ingredients to avoid (allergies, dislikes). Only the fields given change; pass an
-        empty list to clear cuisines or avoid."""
+        food"), ingredients to avoid (allergies, dislikes) and where they live ("we're in Pune" =
+        "Pune, Maharashtra, India"). Only the fields given change; pass an empty list to clear
+        cuisines or avoid, or an empty location to go back to the time zone's country."""
         household = load()
         prefs = household.preferences
         if diet is not None:
@@ -306,8 +308,11 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
             prefs.cuisines = [c.strip() for c in cuisines if c.strip()][:6]
         if avoid is not None:
             prefs.avoid = [a.strip() for a in avoid if a.strip()][:12]
+        if location is not None:
+            prefs.location = location.strip()[:80]
         save(household)
-        parts = [prefs.diet if prefs.diet != "any" else "any diet"]
+        parts = [prefs.location] if prefs.location else []
+        parts.append(prefs.diet if prefs.diet != "any" else "any diet")
         if prefs.cuisines:
             parts.append(", ".join(prefs.cuisines))
         if prefs.avoid:

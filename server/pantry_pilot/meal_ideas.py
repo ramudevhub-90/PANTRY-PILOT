@@ -126,10 +126,14 @@ def suggest_request(
     if avoid:
         text += "\n\nAlready suggested, so pick different dishes: " + ", ".join(avoid)
     cuisine_note = (
-        f", in these cuisines: {', '.join(preferences.cuisines)}" if preferences.cuisines else ", in the local home-style cuisine"
+        f", in these cuisines: {', '.join(preferences.cuisines)}"
+        if preferences.cuisines
+        else ", in the home-style cuisine of that city and state"
+        if preferences.location.strip()
+        else ", in the local home-style cuisine"
     )
     system = SUGGEST_PROMPT.format(
-        place=place_for(zone),
+        place=preferences.location.strip() or place_for(zone),
         occasion=occasion,
         count=count,
         cuisine_note=cuisine_note,

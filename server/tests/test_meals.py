@@ -163,3 +163,13 @@ def test_cancel_timer_stops_by_label_or_all():
     rest = call_tool(store, "cancel_timer", {})
     assert rest["stopped"] == ["dal"] and store.load("test").timers == []
     assert call_tool(store, "cancel_timer", {})["summary"] == "No timers were running"
+
+
+def test_saved_city_steers_meal_ideas():
+    store = MemoryStore()
+    saved = call_tool(store, "set_food_preferences", {"location": "Bengaluru, Karnataka, India"})
+    assert saved["summary"] == "Saved: Bengaluru, Karnataka, India · any diet"
+    nova = IdeasNova([[POHA]])
+    plan(store, nova, {"meal": "breakfast"}, zone="Asia/Kolkata")
+    system = nova.requests[0][0]
+    assert "home cook in Bengaluru, Karnataka, India" in system and "that city and state" in system
