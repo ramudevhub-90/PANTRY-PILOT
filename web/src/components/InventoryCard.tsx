@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { Camera, Plus, Refrigerator } from 'lucide-react';
+import { Camera, Check, Flame, Mic, PackageCheck, Plus, Refrigerator, Search, ShoppingBasket } from 'lucide-react';
+import { useAssistant } from '../agent/useAssistant';
+import { useKitchenActions } from '../agent/useKitchenActions';
 import { AddItemForm } from './AddItemForm';
 import { ScanButton } from './ScanButton';
 import { daysUntil, expiryLabel, expiryLevel } from '../lib/format';
@@ -18,6 +20,23 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'pantry', label: 'Pantry' },
 ];
 
+const SOURCE_ICON: Partial<Record<PantryItem['source'], typeof Camera>> = {
+  scan: Camera,
+  order: PackageCheck,
+  voice: Mic,
+};
+
+const SOURCE_LABEL: Partial<Record<PantryItem['source'], string>> = {
+  scan: 'scanned',
+  order: 'from an order',
+  voice: 'by voice',
+};
+
+/** How much shelf life is left, as a bar: two weeks or more is full. */
+function freshness(days: number): number {
+  return Math.max(4, Math.min(100, (days / 14) * 100));
+}
+
 function matches(item: PantryItem, filter: Filter): boolean {
   if (filter === 'all') return true;
   if (filter === 'soon') return daysUntil(item.expiresOn) <= 3;
@@ -27,11 +46,17 @@ function matches(item: PantryItem, filter: Filter): boolean {
 
 export function InventoryCard() {
   const { state } = usePantry();
+  const { ask } = useAssistant();
+  const { addGrocery } = useKitchenActions();
   const [filter, setFilter] = useState<Filter>('all');
   const [adding, setAdding] = useState(false);
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
   const items = state.inventory
-    .filter((i) => matches(i, filter))
+    .filter((i) => matches(i, filter) && (!q || i.name.toLowerCase().includes(q)))
     .sort((a, b) => daysUntil(a.expiresOn) - daysUntil(b.expiresOn));
+  const useSoon = state.inventory.filter((i) => daysUntil(i.expiresOn) <= 3);
+  const onList = new Set(state.grocery.filter((g) => !g.checked).map((g) => g.name.toLowerCase()));
 
   return (
     <section className="card card--inventory" aria-labelledby="inventory-title">
@@ -51,40 +76,87 @@ export function InventoryCard() {
 
       {adding && <AddItemForm onDone={() => setAdding(false)} />}
 
-      <div className="filters" role="group" aria-label="Filter pantry">
-        {FILTERS.map((f) => (
-          <button key={f.id} type="button" className="filter" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
-            {f.label}
+      {useSoon.length > 0 && (
+        <div className="pantry-alert">
+          <Flame size={18} aria-hidden="true" />
+          <div>
+            <strong>
+              {useSoon.length} {useSoon.length === 1 ? 'item' : 'items'} to use in the next 3 days
+            </strong>
+            <span>{useSoon.slice(0, 4).map((i) => i.name).join(', ')}{useSoon.length > 4 ? '…' : ''}</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn--sm"
+            onClick={() => void ask('What can I make with the food that expires soon?')}
+            disabled={state.mode === 'thinking'}
+          >
+            Cook with these
           </button>
-        ))}
+        </div>
+      )}
+
+      <div className="pantry-tools">
+        {state.inventory.length > 8 && (
+          <label className="pantry-search">
+            <Search size={15} aria-hidden="true" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search your pantry" aria-label="Search your pantry" />
+          </label>
+        )}
+        <div className="filters" role="group" aria-label="Filter pantry">
+          {FILTERS.map((f) => {
+            const n = state.inventory.filter((i) => matches(i, f.id)).length;
+            if (f.id !== 'all' && n === 0) return null;
+            return (
+              <button key={f.id} type="button" className="filter" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
+                {f.label}
+                <span className="filter__n">{n}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {items.length === 0 ? (
-        <p className="muted">Nothing here.</p>
+        <p className="muted">{q ? `Nothing matches “${query.trim()}”.` : 'Nothing here.'}</p>
       ) : (
-        <ul className="inv">
+        <ul className="plist">
           {items.map((item) => {
             const days = daysUntil(item.expiresOn);
+            const level = expiryLevel(days);
+            const listed = onList.has(item.name.toLowerCase());
+            const SourceIcon = SOURCE_ICON[item.source];
             return (
-              <li key={item.id} className={`inv__row${state.highlight.includes(item.id) ? ' is-new' : ''}`}>
-                <span className="inv__emoji" aria-hidden="true">
+              <li key={item.id} className={`pitem pitem--${level}${state.highlight.includes(item.id) ? ' is-new' : ''}`}>
+                <span className="pitem__emoji" aria-hidden="true">
                   {item.emoji}
                 </span>
-                <div className="inv__main">
-                  <span className="inv__name">
-                    {item.name}
-                    {item.source === 'scan' && (
-                      <span className="tag">
-                        <Camera size={11} />
-                        scanned
+                <div className="pitem__main">
+                  <span className="pitem__name">{item.name}</span>
+                  <span className="pitem__meta">
+                    {item.quantity} {item.unit}
+                    {SourceIcon && (
+                      <span className="pitem__source">
+                        <SourceIcon size={11} aria-hidden="true" />
+                        {SOURCE_LABEL[item.source]}
                       </span>
                     )}
                   </span>
-                  <span className="inv__qty">
-                    {item.quantity} {item.unit}
+                  <span className="pitem__fresh" aria-hidden="true">
+                    <span style={{ width: `${freshness(days)}%` }} />
                   </span>
                 </div>
-                <span className={`badge badge--${expiryLevel(days)}`}>{expiryLabel(days)}</span>
+                <span className={`badge badge--${level}`}>{expiryLabel(days)}</span>
+                <button
+                  type="button"
+                  className={`pitem__add${listed ? ' is-listed' : ''}`}
+                  onClick={() => !listed && addGrocery(item.name)}
+                  disabled={listed}
+                  aria-label={listed ? `${item.name} is on the grocery list` : `Add ${item.name} to the grocery list`}
+                  title={listed ? 'On the grocery list' : 'Add to grocery list'}
+                >
+                  {listed ? <Check size={15} /> : <ShoppingBasket size={15} />}
+                </button>
               </li>
             );
           })}
