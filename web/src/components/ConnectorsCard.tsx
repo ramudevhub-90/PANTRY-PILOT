@@ -4,11 +4,17 @@ import { api, type Connector, type KrogerStatus } from '../agent/remote';
 import { availableHere } from '../lib/region';
 import { usePantry } from '../state/store';
 
-const NOT_A_CALLBACK =
-  'That isn’t the sign-in address yet. In the app’s sign-in tab, click the address bar (⌘L or Ctrl+L), copy it (⌘C or Ctrl+C), and try again.';
-
 const touchScreen = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
-const looksLikeCallback =(text: string) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/callback\?.*code=/.test(text.trim());
+
+const NOT_A_CALLBACK = touchScreen
+  ? 'That isn’t the sign-in address yet. In the sign-in tab, tap the address bar, tap and hold the address, choose Copy, then come back.'
+  : 'That isn’t the sign-in address yet. In the app’s sign-in tab, click the address bar (⌘L or Ctrl+L), copy it (⌘C or Ctrl+C), and try again.';
+
+// iPhone Safari copies the address bar without "http://", so the scheme is optional.
+const CALLBACK = /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?\/callback\?.*code=/i;
+const looksLikeCallback = (text: string) => CALLBACK.test(text.trim());
+/** The pasted address with a scheme, as the server expects. */
+const callbackUrl = (text: string) => (/^https?:\/\//i.test(text.trim()) ? text.trim() : `http://${text.trim()}`);
 
 function connectedNote(name: string, hasOrders: boolean): string {
   return hasOrders
@@ -101,7 +107,7 @@ export function ConnectorsCard() {
 
   async function complete(c: Connector, address: string) {
     if (!looksLikeCallback(address)) throw new Error(NOT_A_CALLBACK);
-    const res = await api.finishConnector(c.id, address.trim());
+    const res = await api.finishConnector(c.id, callbackUrl(address));
     setConnectors(res.connectors.filter((c) => availableHere(c.id)));
     setConnecting(null);
     setPasted('');
