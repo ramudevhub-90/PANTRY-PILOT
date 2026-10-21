@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { House, Languages, LocateFixed, MapPin, SlidersHorizontal, X } from 'lucide-react';
 import { HAS_SERVER, api } from '../agent/remote';
-import { deviceCity } from '../lib/geo';
+import { CITY_NAMES, deviceCity } from '../lib/geo';
 import { POLLY_CODES, REPLY_LANGUAGES } from '../lib/language';
 import { currentOccasion, deviceTimeZone, placeForZone } from '../lib/mealtime';
 import { usePantry } from '../state/store';
@@ -57,11 +57,67 @@ function rememberAsked() {
   }
 }
 
-const list = (text: string) =>
-  text
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+const OTHER = '__other';
+
+const CUISINES = [
+  'South Indian', 'North Indian', 'Bengali', 'Punjabi', 'Gujarati', 'Maharashtrian', 'Kerala',
+  'Chettinad', 'Hyderabadi', 'Indo-Chinese', 'Italian', 'Continental', 'Mexican', 'Thai',
+];
+const AVOID = ['Mushroom', 'Peanuts', 'Onion', 'Garlic', 'Eggs', 'Beef', 'Pork', 'Gluten', 'Dairy', 'Shellfish', 'Brinjal'];
+
+/** Tap to add or remove; type anything else and press Enter (or tap +). */
+function ChipPicker({
+  label,
+  options,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  options: string[];
+  value: string[];
+  onChange: (next: string[]) => void;
+  placeholder: string;
+}) {
+  const [draft, setDraft] = useState('');
+  const has = (x: string) => value.some((v) => v.toLowerCase() === x.toLowerCase());
+  const toggle = (x: string) => onChange(has(x) ? value.filter((v) => v.toLowerCase() !== x.toLowerCase()) : [...value, x]);
+  const extra = value.filter((v) => !options.some((o) => o.toLowerCase() === v.toLowerCase()));
+  const add = () => {
+    const x = draft.trim();
+    if (x && !has(x)) onChange([...value, x]);
+    setDraft('');
+  };
+  return (
+    <div className="chip-picker" role="group" aria-label={label}>
+      <span className="chip-picker__label">{label}</span>
+      <div className="chip-picker__chips">
+        {[...options, ...extra].map((o) => (
+          <button key={o} type="button" className="pchip" aria-pressed={has(o)} onClick={() => toggle(o)}>
+            {o}
+          </button>
+        ))}
+      </div>
+      <div className="prefs-form__row">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            }
+          }}
+          placeholder={placeholder}
+          aria-label={placeholder}
+        />
+        <button type="button" className="btn btn--secondary btn--sm" onClick={add} disabled={!draft.trim()}>
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /** Diet, favourite cuisines and foods to avoid; meal ideas follow them. Also settable by voice. */
 export function FoodPreferences() {
@@ -69,8 +125,9 @@ export function FoodPreferences() {
   const prefs = state.preferences;
   const [editing, setEditing] = useState(false);
   const [diet, setDiet] = useState<Diet>(prefs.diet);
-  const [cuisines, setCuisines] = useState('');
-  const [avoid, setAvoid] = useState('');
+  const [cuisines, setCuisines] = useState<string[]>([]);
+  const [avoid, setAvoid] = useState<string[]>([]);
+  const [region, setRegion] = useState('');
   const [location, setLocation] = useState('');
   const [homeCuisine, setHomeCuisine] = useState('');
   const [language, setLanguage] = useState('English');
@@ -143,8 +200,9 @@ export function FoodPreferences() {
 
   function open() {
     setDiet(prefs.diet);
-    setCuisines(prefs.cuisines.join(', '));
-    setAvoid(prefs.avoid.join(', '));
+    setCuisines(prefs.cuisines);
+    setAvoid(prefs.avoid);
+    setRegion(prefs.region || '');
     setLocation(prefs.location);
     setHomeCuisine(prefs.homeCuisine === 'local' ? '' : prefs.homeCuisine);
     setLanguage(prefs.language || 'English');
@@ -159,10 +217,11 @@ export function FoodPreferences() {
     try {
       await apply({
         diet,
-        cuisines: list(cuisines),
-        avoid: list(avoid),
+        cuisines,
+        avoid,
+        region,
         location: location.trim(),
-        homeCuisine: homeCuisine.trim() || (prefs.homeCuisine ? 'local' : ''),
+        homeCuisine: homeCuisine.trim() || 'local',
         language,
       });
       setEditing(false);
@@ -245,15 +304,58 @@ export function FoodPreferences() {
     );
   }
 
+  const homeChoice = !homeCuisine ? '' : HOME_FOODS.includes(homeCuisine) ? homeCuisine : OTHER;
+
   return (
     <form className="prefs-form" onSubmit={save}>
       <label>
         City
-        <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Bengaluru, Karnataka" />
+        <div className="prefs-form__row">
+          <input
+            list="pp-cities"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            placeholder="Start typing: Bengaluru, Kolkata…"
+          />
+          <button
+            type="button"
+            className="btn btn--secondary btn--sm"
+            disabled={locating}
+            onClick={async () => {
+              setLocating(true);
+              const city = await deviceCity();
+              setLocating(false);
+              if (city) setLocation(city);
+              else setError('Couldn’t get your city from the device. Pick it from the list.');
+            }}
+          >
+            <LocateFixed size={14} aria-hidden="true" />
+            {locating ? 'Locating…' : 'My device'}
+          </button>
+        </div>
+        <datalist id="pp-cities">
+          {CITY_NAMES.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
       </label>
       <label>
         Food you grew up with
-        <input value={homeCuisine} onChange={(e) => setHomeCuisine(e.target.value)} placeholder="Bengali (leave empty for local food)" />
+        <select
+          value={homeChoice}
+          onChange={(e) => setHomeCuisine(e.target.value === OTHER ? ' ' : e.target.value)}
+        >
+          <option value="">Same as where I live</option>
+          {HOME_FOODS.map((f) => (
+            <option key={f} value={f}>
+              {f}
+            </option>
+          ))}
+          <option value={OTHER}>Other…</option>
+        </select>
+        {homeChoice === OTHER && (
+          <input value={homeCuisine.trim()} onChange={(e) => setHomeCuisine(e.target.value || ' ')} placeholder="e.g. Sindhi" autoFocus />
+        )}
       </label>
       <label>
         Reply language
@@ -276,13 +378,15 @@ export function FoodPreferences() {
           ))}
         </select>
       </label>
+      <ChipPicker label="Favourite cuisines" options={CUISINES} value={cuisines} onChange={setCuisines} placeholder="Add another cuisine" />
+      <ChipPicker label="Never use" options={AVOID} value={avoid} onChange={setAvoid} placeholder="Add an ingredient" />
       <label>
-        Favourite cuisines
-        <input value={cuisines} onChange={(e) => setCuisines(e.target.value)} placeholder="South Indian, Punjabi, Italian" />
-      </label>
-      <label>
-        Never use
-        <input value={avoid} onChange={(e) => setAvoid(e.target.value)} placeholder="mushroom, peanuts" />
+        Shopping apps
+        <select value={region} onChange={(e) => setRegion(e.target.value)}>
+          <option value="">Automatic (from this device’s time zone)</option>
+          <option value="IN">India: Swiggy Instamart, Zepto, BigBasket</option>
+          <option value="US">United States: Kroger, Instacart</option>
+        </select>
       </label>
       {error && <p className="auth-error">{error}</p>}
       <div className="prefs-form__actions">

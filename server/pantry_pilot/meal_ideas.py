@@ -126,7 +126,14 @@ def suggest_request(
     if avoid:
         text += "\n\nAlready suggested, so pick different dishes: " + ", ".join(avoid)
     home = preferences.home_cuisine.strip()
-    if preferences.cuisines:
+    if preferences.cuisines and home and home.lower() != "local":
+        # Both: mostly the food they grew up with, sometimes their other favourites.
+        cuisine_note = (
+            f". They grew up eating {home} food: make most dishes {home} home cooking, and at most one "
+            f"from their other favourites ({', '.join(preferences.cuisines)}), using ingredients easy to "
+            "buy where they live"
+        )
+    elif preferences.cuisines:
         cuisine_note = f", in these cuisines: {', '.join(preferences.cuisines)}"
     elif home and home.lower() != "local":
         # Migrants: cook the food they grew up with, from what the local shops sell.
@@ -220,7 +227,7 @@ def to_meals(
             Meal(
                 id=_slug(name),
                 name=name[:80],
-                emoji=str(dish.get("emoji") or "🍽️")[:4],
+                emoji=dish_emoji(name, str(dish.get("emoji") or "")),
                 minutes=max(1, min(int(dish.get("minutes") or 20), 600)),
                 servings=max(1, min(int(dish.get("servings") or 2), 20)),
                 uses=[i.name for i in uses],
@@ -253,3 +260,33 @@ def suits(meal: Meal, preferences: FoodPreferences) -> bool:
     names = [meal.name, *meal.uses, *meal.missing]
     banned = _FORBIDDEN.get(preferences.diet, ())
     return not any(b in n.lower() for n in names for b in banned) and not any(avoided(n, preferences) for n in names)
+
+
+# A meat emoji must match the dish: Nova once gave an egg scramble 🥓.
+_MEAT_EMOJI = {
+    "🥓": ("bacon", "pork", "ham"),
+    "🍗": ("chicken",),
+    "🍖": ("mutton", "lamb", "meat", "rib", "pork"),
+    "🥩": ("steak", "beef", "mutton", "meat", "lamb"),
+    "🐟": ("fish", "macher", "meen"),
+    "🍤": ("prawn", "shrimp", "chingri"),
+    "🦀": ("crab",),
+}
+_DISH_EMOJI = (
+    (("egg", "omelette", "anda", "dim"), "🍳"),
+    (("dal", "sambar", "rasam", "soup", "stew", "curry", "jhol", "korma"), "🍛"),
+    (("rice", "pulao", "biryani", "khichdi", "bhath", "bath"), "🍚"),
+    (("roti", "paratha", "chapati", "dosa", "uttapam", "pancake", "chilla"), "🫓"),
+    (("salad", "raita", "chaat"), "🥗"),
+    (("noodle", "pasta", "maggi"), "🍜"),
+    (("tea", "chai"), "🍵"),
+)
+
+
+def dish_emoji(name: str, emoji: str) -> str:
+    """Nova's emoji for the dish, unless it shows meat the dish doesn't have; then one from the name."""
+    lower = name.lower()
+    emoji = emoji.strip()[:4]
+    if emoji and not (emoji in _MEAT_EMOJI and not any(w in lower for w in _MEAT_EMOJI[emoji])):
+        return emoji
+    return next((e for words, e in _DISH_EMOJI if any(w in lower for w in words)), "🍽️")

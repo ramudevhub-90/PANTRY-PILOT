@@ -59,6 +59,9 @@ const CITIES: [string, string, number, number][] = [
   ['Gangtok', 'Sikkim', 27.33, 88.61],
 ];
 
+/** "Bengaluru, Karnataka, India" for every known city, for the city picker. */
+export const CITY_NAMES = CITIES.map(([city, state]) => `${city}, ${state}, India`);
+
 const MAX_KM = 150;
 
 function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {

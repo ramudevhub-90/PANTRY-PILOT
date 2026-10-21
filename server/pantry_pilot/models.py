@@ -105,6 +105,9 @@ class FoodPreferences(ApiModel):
     """Ingredients never to use (allergies, dislikes)."""
     location: str = ""
     """City and region, e.g. "Bengaluru, Karnataka, India". Empty: the country from the time zone."""
+    region: str = ""
+    """Shopping apps to use: "IN" (Swiggy, Zepto, BigBasket), "US" (Kroger, Instacart) or "" for the
+    device's time zone."""
     language: str = "English"
     """Language for replies and meal ideas (English, Hindi, Bengali, Tamil...). Pantry names stay as they are."""
     home_cuisine: str = ""

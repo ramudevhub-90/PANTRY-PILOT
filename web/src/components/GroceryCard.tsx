@@ -26,8 +26,8 @@ export function GroceryCard() {
     .slice(0, 4);
 
   useEffect(() => {
-    if (HAS_SERVER && availableHere('instacart')) api.instacartEnabled().then(setInstacart).catch(() => setInstacart(false));
-  }, []);
+    if (HAS_SERVER && availableHere('instacart', state.preferences.region)) api.instacartEnabled().then(setInstacart).catch(() => setInstacart(false));
+  }, [state.preferences.region]);
 
   function add(e: React.FormEvent) {
     e.preventDefault();
@@ -132,7 +132,7 @@ export function GroceryCard() {
         </button>
       </form>
 
-      {instacart && (
+      {instacart && availableHere('instacart', state.preferences.region) && (
         <div className="instacart">
           <button type="button" className="btn" onClick={shop} disabled={shopping || open.length === 0}>
             <ExternalLink size={15} />
@@ -143,7 +143,7 @@ export function GroceryCard() {
         </div>
       )}
 
-      {availableHere('kroger') && <KrogerCart openItems={open.length} />}
+      {availableHere('kroger', state.preferences.region) && <KrogerCart openItems={open.length} />}
 
     </section>
   );

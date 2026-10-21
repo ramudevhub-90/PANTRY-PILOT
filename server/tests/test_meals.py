@@ -200,3 +200,21 @@ def test_reply_language_reaches_the_meal_prompt():
     nova = IdeasNova([[POHA]])
     plan(store, nova, {"meal": "dinner"})
     assert "in Bengali, with the English dish name in brackets" in nova.requests[0][0]
+
+
+def test_home_food_blends_with_favourite_cuisines():
+    store = MemoryStore()
+    call_tool(store, "set_food_preferences", {"home_cuisine": "Bengali", "cuisines": ["South Indian", "Italian"]})
+    nova = IdeasNova([[POHA]])
+    plan(store, nova, {"meal": "dinner"})
+    system = nova.requests[0][0]
+    assert "make most dishes Bengali home cooking" in system and "(South Indian, Italian)" in system
+
+
+def test_meat_emoji_on_a_vegetarian_dish_is_replaced():
+    from pantry_pilot.meal_ideas import dish_emoji
+
+    assert dish_emoji("Bengali-Style Garlic Egg Scramble", "🥓") == "🍳"
+    assert dish_emoji("Chicken Kosha", "🍗") == "🍗"
+    assert dish_emoji("Aloo Posto", "🥔") == "🥔"
+    assert dish_emoji("Masoor Dal", "") == "🍛"

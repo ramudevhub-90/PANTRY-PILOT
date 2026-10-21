@@ -25,7 +25,8 @@ export const APP_REGION: Record<string, Region> = {
   instacart: 'US',
 };
 
-export function availableHere(appId: string): boolean {
+/** `chosen` is the household's own choice ("IN", "US"); empty means the device's time zone. */
+export function availableHere(appId: string, chosen = ''): boolean {
   const region = APP_REGION[appId];
-  return !region || region === userRegion;
+  return !region || region === ((chosen as Region) || userRegion);
 }

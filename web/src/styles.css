@@ -2695,3 +2695,53 @@ p {
   flex-wrap: wrap;
   gap: 6px;
 }
+
+.prefs-form__row {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.prefs-form__row input {
+  flex: 1;
+}
+
+.prefs-form__row .btn {
+  flex: none;
+  gap: 4px;
+}
+
+.chip-picker {
+  display: grid;
+  gap: 6px;
+}
+
+.chip-picker__label {
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.chip-picker__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pchip {
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.pchip[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}

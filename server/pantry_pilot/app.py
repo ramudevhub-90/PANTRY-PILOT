@@ -266,8 +266,8 @@ def create_app(
             history = await anyio.to_thread.run_sync(load_chat)
             before = len(history)
             try:
-                language = store.load(household_id_now()).preferences.language
-                async for event in run_agent(text, history, client, nova, language=language):
+                prefs = store.load(household_id_now()).preferences
+                async for event in run_agent(text, history, client, nova, language=prefs.language, region=prefs.region):
                     yield event
             finally:
                 if len(history) != before:
@@ -354,6 +354,8 @@ def create_app(
             args["home_cuisine"] = body["homeCuisine"]
         if "language" in body:
             args["language"] = body["language"]
+        if "region" in body:
+            args["region"] = body["region"] or "auto"
         async with Client(mcp) as client:
             result = await client.call_tool("set_food_preferences", args)
         if result.is_error:

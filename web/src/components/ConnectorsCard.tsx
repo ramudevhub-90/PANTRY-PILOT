@@ -51,6 +51,7 @@ function ago(epochSeconds: number | null): string {
 /** Swiggy Instamart and Zepto: connect once, then import delivered orders into the pantry. */
 export function ConnectorsCard() {
   const { state, dispatch } = usePantry();
+  const region = state.preferences.region;
   const [whatsapp, setWhatsapp] = useState('');
   const [editingWhatsapp, setEditingWhatsapp] = useState(false);
   const [connectors, setConnectors] = useState<Connector[] | null>(null);
@@ -62,8 +63,8 @@ export function ConnectorsCard() {
   const [kroger, setKroger] = useState<KrogerStatus>({ enabled: false, connected: false });
 
   useEffect(() => {
-    api.connectors().then((list) => setConnectors(list.filter((c) => availableHere(c.id)))).catch(() => setConnectors([]));
-    if (availableHere('kroger')) api.kroger().then(setKroger).catch(() => undefined);
+    api.connectors().then(setConnectors).catch(() => setConnectors([]));
+    api.kroger().then(setKroger).catch(() => undefined);
   }, []);
 
   const connectKroger = () =>
@@ -125,7 +126,7 @@ export function ConnectorsCard() {
   async function complete(c: Connector, address: string) {
     if (!looksLikeCallback(address)) throw new Error(NOT_A_CALLBACK);
     const res = await api.finishConnector(c.id, callbackUrl(address));
-    setConnectors(res.connectors.filter((c) => availableHere(c.id)));
+    setConnectors(res.connectors);
     setConnecting(null);
     setPasted('');
     setMessage({ tone: 'ok', text: connectedNote(c.name, c.hasOrders) });
@@ -145,14 +146,14 @@ export function ConnectorsCard() {
   const sync = (c: Connector) =>
     act(`sync-${c.id}`, async () => {
       const res = await api.syncConnector(c.id);
-      setConnectors(res.connectors.filter((c) => availableHere(c.id)));
+      setConnectors(res.connectors);
       if (res.state) dispatch({ type: 'sync_state', state: res.state });
       if (res.sync) setMessage({ tone: 'ok', text: res.sync.summary });
     });
 
   const disconnect = (c: Connector) =>
     act(`disconnect-${c.id}`, async () => {
-      setConnectors((await api.disconnectConnector(c.id)).connectors.filter((x) => availableHere(x.id)));
+      setConnectors((await api.disconnectConnector(c.id)).connectors);
     });
 
   return (
@@ -171,7 +172,7 @@ export function ConnectorsCard() {
         <p className="muted">Loading…</p>
       ) : (
         <ul className="apps">
-          {connectors.map((c) => (
+          {connectors.filter((c) => availableHere(c.id, region)).map((c) => (
             <li key={c.id} className="app-row">
               <div className="app-row__main">
                 <strong>{c.name}</strong>
@@ -273,7 +274,7 @@ export function ConnectorsCard() {
               )}
             </li>
           ))}
-          {kroger.enabled && (
+          {kroger.enabled && availableHere('kroger', region) && (
             <li className="app-row">
               <div className="app-row__main">
                 <strong>Kroger</strong>

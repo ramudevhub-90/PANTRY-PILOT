@@ -93,10 +93,12 @@ async def run_agent(
     nova: Nova,
     max_steps: int = 6,
     language: str = "English",
+    region: str = "",
 ) -> AsyncIterator[dict[str, Any]]:
     """One user turn: loop Nova -> MCP tools until Nova answers in words."""
     listed = await client.list_tools()
-    hidden = _HIDDEN_TOOLS | (set() if in_us(local_now()) else _US_ONLY_TOOLS)
+    us = region == "US" or (not region and in_us(local_now()))
+    hidden = _HIDDEN_TOOLS | (set() if us else _US_ONLY_TOOLS)
     tools = [
         {"toolSpec": {"name": t.name, "description": t.description or "", "inputSchema": {"json": t.input_schema}}}
         for t in listed.tools

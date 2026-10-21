@@ -107,4 +107,6 @@ export interface FoodPreferences {
   homeCuisine: string;
   /** Language for replies and meal ideas, e.g. "Bengali". */
   language: string;
+  /** Shopping apps: "IN", "US", or "" for the device's time zone. */
+  region: string;
 }

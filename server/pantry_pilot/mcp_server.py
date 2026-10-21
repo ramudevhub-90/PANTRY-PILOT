@@ -299,6 +299,7 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
         location: str | None = None,
         home_cuisine: str | None = None,
         language: str | None = None,
+        region: Literal["IN", "US", "auto"] | None = None,
     ) -> dict[str, Any]:
         """Remember what the household eats, so meal ideas follow it: diet ("we're vegetarian",
         "we eat eggs but no meat" = eggetarian, "Jain"), favourite cuisines ("we like South Indian
@@ -322,6 +323,8 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
             prefs.home_cuisine = home_cuisine.strip()[:40]
         if language is not None:
             prefs.language = language.strip().title()[:24] or "English"
+        if region is not None:
+            prefs.region = "" if region == "auto" else region
         save(household)
         parts = [prefs.location] if prefs.location else []
         if prefs.home_cuisine and prefs.home_cuisine.lower() != "local":
