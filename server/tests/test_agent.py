@@ -167,3 +167,13 @@ def test_markdown_is_stripped_from_spoken_replies():
     assert plain("Top dinner pick: **Masoor Dal** with *rice*.") == "Top dinner pick: Masoor Dal with rice."
     assert plain("- Start the timer\n- `rice`") == "Start the timer\nrice"
     assert plain("2 * 3 = 6") == "2 * 3 = 6"
+
+
+def test_language_requests_and_whats_for_dinner():
+    from pantry_pilot.agent import requested_language, wants_meal_ideas
+
+    assert requested_language("Alexa, talk to me in Bengali. What's for dinner tonight?") == "Bengali"
+    assert requested_language("Switch back to English replies, please") == "English"
+    assert requested_language("reply in Hindi") == "Hindi"
+    assert requested_language("We're Bengali") is None  # home food, not a language switch
+    assert wants_meal_ideas("Alexa, talk to me in Bengali. What's for dinner tonight?")

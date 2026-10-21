@@ -34,6 +34,7 @@ How to work:
 - When the user agrees to an offer you made ("yes", "sure"), do it.
 - Timers: set_timer starts one, cancel_timer stops them ("stop the timer").
 - Only say you did something after the tool for it succeeded; never claim an action you didn't take.
+- Never repeat an earlier reply from this conversation; answer from this turn's tool results.
 - Missing ingredients: say only the ones plan_meals lists as missing; never call something missing
   that the pantry has.
 - To change the reply language ("talk to me in Hindi", "back to English"), call
@@ -62,9 +63,28 @@ _THINKING = re.compile(r"<thinking>.*?</thinking>", re.S)
 _MEAL = re.compile(r"\b(breakfast|brunch|lunch|dinner|supper|snacks?|tiffin|meal)\b", re.I)
 _IDEAS = re.compile(
     r"\b(ideas?|suggest\w*|what (can|should|could) (i|we) (make|cook|eat|have)|recipes?|plan|cook|make|options?|"
-    r"something (else|different))\b",
+    r"something (else|different)|what['’]?s for|what is for|what to (make|cook|eat))\b",
     re.I,
 )
+
+_LANGUAGES = (
+    "english", "hindi", "bengali", "bangla", "tamil", "telugu", "kannada", "malayalam", "marathi",
+    "gujarati", "punjabi", "odia", "oriya",
+)
+_ASK_LANGUAGE = re.compile(
+    rf"\b(?:talk|speak|reply|answer|respond|switch(?: back)?)\b[^.?!]{{0,20}}?\b(?:in|to)\s+({'|'.join(_LANGUAGES)})\b|"
+    rf"\bback to ({'|'.join(_LANGUAGES)})\b",
+    re.I,
+)
+
+
+def requested_language(text: str) -> str | None:
+    """"Talk to me in Bengali", "reply in Hindi", "back to English" -> the language, else None."""
+    m = _ASK_LANGUAGE.search(text)
+    if not m:
+        return None
+    name = (m.group(1) or m.group(2)).lower()
+    return {"bangla": "Bengali", "oriya": "Odia"}.get(name, name.title())
 
 
 def wants_meal_ideas(text: str) -> bool:

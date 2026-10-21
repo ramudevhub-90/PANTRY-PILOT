@@ -20,7 +20,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 
 from . import connectors, ordering, voice
-from .agent import call_tool_with_events, run_agent
+from .agent import call_tool_with_events, requested_language, run_agent
 from .auth import (
     ALL_SCOPES,
     AccountDirectory,
@@ -288,6 +288,11 @@ def create_app(
             history = await anyio.to_thread.run_sync(load_chat)
             before = len(history)
             try:
+                # "Talk to me in Bengali" is saved before the agent runs, so the reply (and any meal
+                # question in the same sentence) already uses the new language.
+                if language := requested_language(text):
+                    async for event in call_tool_with_events(client, "set_food_preferences", {"language": language}):
+                        yield event
                 prefs = store.load(household_id_now()).preferences
                 async for event in run_agent(text, history, client, nova, language=prefs.language, region=prefs.region):
                     yield event
