@@ -20,6 +20,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import re
 import secrets
 import time
 import urllib.error
@@ -266,9 +267,22 @@ def _save_tokens(
     )
 
 
+def callback_params(text: str) -> dict[str, str]:
+    """code, state and error from whatever a browser copied: with or without the scheme (iPhone
+    Safari drops it), URL-encoded, wrapped in spaces or line breaks, or with a #fragment."""
+    t = re.sub(r"\s+", "", text)
+    if re.search(r"%3F|%26|%3D", t, re.I) and not re.search(r"[?&]code=", t):
+        t = urllib.parse.unquote(t)
+    found = {}
+    for key in ("code", "state", "error"):
+        if m := re.search(rf"[?&#]{key}=([^&#]+)", t):
+            found[key] = urllib.parse.unquote(m.group(1))
+    return found
+
+
 def finish_sign_in(store: Store, user: str, provider: Provider, redirect_url: str) -> None:
     """Completes sign-in from the http://localhost/callback?code=… address the user pasted back."""
-    params = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(redirect_url.strip()).query))
+    params = callback_params(redirect_url)
     pending = store.load_record(_pending_key(user, provider))
     if params.get("error"):
         raise ConnectorError(f"{provider.name} sign-in was cancelled or failed ({params['error']}).")

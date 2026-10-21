@@ -288,3 +288,21 @@ def test_bigbasket_registers_as_a_confidential_client_and_sends_its_secret(monke
     connectors.finish_sign_in(store, "alice", bigbasket, f"http://localhost/callback?code=c&state={state}")
     assert posts[0][1]["token_endpoint_auth_method"] == "client_secret_post"
     assert posts[-1][1]["client_secret"] == "bb-secret"
+
+
+@pytest.mark.parametrize("pasted", [
+    "http://localhost/callback?code=abc123&state=st-1",
+    "https://localhost/callback?code=abc123&state=st-1",
+    "localhost/callback?code=abc123&state=st-1",  # iPhone Safari drops the scheme
+    "127.0.0.1/callback?state=st-1&code=abc123",
+    "  http://localhost/callback?code=abc123\n&state=st-1 ",  # spaces and a line break
+    "http://localhost/callback?code=abc123&state=st-1#_=_",  # a fragment
+    "http%3A%2F%2Flocalhost%2Fcallback%3Fcode%3Dabc123%26state%3Dst-1",  # URL-encoded
+])
+def test_callback_params_from_any_browser(pasted):
+    assert connectors.callback_params(pasted) == {"code": "abc123", "state": "st-1"}
+
+
+def test_callback_params_reports_errors_and_missing_code():
+    assert connectors.callback_params("localhost/callback?error=access_denied&state=s")["error"] == "access_denied"
+    assert "code" not in connectors.callback_params("https://www.zepto.com/")

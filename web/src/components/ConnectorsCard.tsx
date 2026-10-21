@@ -7,14 +7,31 @@ import { usePantry } from '../state/store';
 const touchScreen = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
 
 const NOT_A_CALLBACK = touchScreen
-  ? 'That isn’t the sign-in address yet. In the sign-in tab, tap the address bar, tap and hold the address, choose Copy, then come back.'
-  : 'That isn’t the sign-in address yet. In the app’s sign-in tab, click the address bar (⌘L or Ctrl+L), copy it (⌘C or Ctrl+C), and try again.';
+  ? 'That isn’t the sign-in address yet. In the sign-in tab, tap the address bar, tap and hold the address, choose Copy, then come back and paste it here.'
+  : 'That isn’t the sign-in address yet. Copy the full address from the sign-in tab (it contains code=), then paste it here.';
 
-// iPhone Safari copies the address bar without "http://", so the scheme is optional.
-const CALLBACK = /^(https?:\/\/)?(localhost|127\.0\.0\.1)(:\d+)?\/callback\?.*code=/i;
-const looksLikeCallback = (text: string) => CALLBACK.test(text.trim());
-/** The pasted address with a scheme, as the server expects. */
-const callbackUrl = (text: string) => (/^https?:\/\//i.test(text.trim()) ? text.trim() : `http://${text.trim()}`);
+/** The sign-in code and state from whatever the browser copied: with or without "http://"
+ * (iPhone Safari drops it), URL-encoded, with spaces, line breaks or a #fragment. Any browser. */
+function callbackParams(text: string): { code: string; state: string } | null {
+  let t = text.replace(/\s+/g, '');
+  if (/%3F|%26|%3D/i.test(t) && !/[?&]code=/.test(t)) {
+    try {
+      t = decodeURIComponent(t);
+    } catch {
+      // Not valid percent-encoding: use it as is.
+    }
+  }
+  const code = /[?&#]code=([^&#]+)/.exec(t)?.[1];
+  const state = /[?&#]state=([^&#]+)/.exec(t)?.[1];
+  return code ? { code, state: state ?? '' } : null;
+}
+
+const looksLikeCallback = (text: string) => callbackParams(text) !== null;
+/** A clean callback address for the server, rebuilt from the code and state. */
+const callbackUrl = (text: string) => {
+  const p = callbackParams(text)!;
+  return `http://localhost/callback?code=${p.code}${p.state ? `&state=${p.state}` : ''}`;
+};
 
 function connectedNote(name: string, hasOrders: boolean): string {
   return hasOrders
