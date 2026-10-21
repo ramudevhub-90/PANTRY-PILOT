@@ -177,3 +177,10 @@ def test_language_requests_and_whats_for_dinner():
     assert requested_language("reply in Hindi") == "Hindi"
     assert requested_language("We're Bengali") is None  # home food, not a language switch
     assert wants_meal_ideas("Alexa, talk to me in Bengali. What's for dinner tonight?")
+
+
+def test_same_language_as_i_speak():
+    from pantry_pilot.agent import requested_language
+
+    assert requested_language("Reply in the same language as me") == "Auto"
+    assert requested_language("talk to me in whatever language I speak") == "Auto"

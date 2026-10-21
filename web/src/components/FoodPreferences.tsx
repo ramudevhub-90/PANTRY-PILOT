@@ -278,7 +278,7 @@ export function FoodPreferences() {
         {prefs.language && prefs.language !== 'English' && (
           <span className="prefs__place prefs__home" title={`Replies in ${prefs.language}`}>
             <Languages size={13} aria-hidden="true" />
-            {prefs.language}
+            {prefs.language === 'Auto' ? 'Your language' : prefs.language}
           </span>
         )}
         {home && (
@@ -362,8 +362,8 @@ export function FoodPreferences() {
         <select value={language} onChange={(e) => setLanguage(e.target.value)}>
           {REPLY_LANGUAGES.map((l) => (
             <option key={l.name} value={l.name}>
-              {l.name}
-              {POLLY_CODES.has(l.code) ? '' : ' (text; voice if your phone has it)'}
+              {l.label ?? l.name}
+              {l.code === 'auto' || POLLY_CODES.has(l.code) ? '' : ' (text; voice if your phone has it)'}
             </option>
           ))}
         </select>

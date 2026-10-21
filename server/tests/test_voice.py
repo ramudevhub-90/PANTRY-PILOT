@@ -53,3 +53,12 @@ def test_spoken_reply_reports_polly_failure():
     with TestClient(create_app(MemoryStore(), MockNova(), "alice", speaker=voice.Speaker(broken))) as client:
         response = client.post("/api/voice/speak", json={"text": "Hello"})
     assert response.status_code == 503
+
+
+def test_auto_language_stream_identifies_english_and_hindi(monkeypatch):
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret")
+    query = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(voice.stream_url("auto")).query))
+    assert query["identify-language"] == "true" and query["language-options"] == "en-IN,hi-IN"
+    assert "language-code" not in query

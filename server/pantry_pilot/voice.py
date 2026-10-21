@@ -13,6 +13,7 @@ import os
 import urllib.parse
 from collections import OrderedDict
 from collections.abc import Callable
+from typing import Any
 
 import boto3
 from botocore.auth import SigV4QueryAuth
@@ -34,11 +35,13 @@ def stream_url(language: str = "en-US", region: str | None = None) -> str:
     credentials = session.get_credentials()
     if credentials is None:
         raise VoiceUnavailable("Hands-free voice needs AWS credentials on the server.")
-    query = urllib.parse.urlencode({
-        "language-code": language if language in LANGUAGES else "en-US",
-        "media-encoding": "pcm",
-        "sample-rate": SAMPLE_RATE,
-    })
+    params: dict[str, Any] = {"media-encoding": "pcm", "sample-rate": SAMPLE_RATE}
+    if language == "auto":
+        # Hear English and Hindi (and Hinglish) without being told which: Transcribe picks per stream.
+        params |= {"identify-language": "true", "language-options": "en-IN,hi-IN", "preferred-language": "en-IN"}
+    else:
+        params["language-code"] = language if language in LANGUAGES else "en-US"
+    query = urllib.parse.urlencode(params)
     request = AWSRequest(
         method="GET",
         url=f"https://transcribestreaming.{region}.amazonaws.com:8443/stream-transcription-websocket?{query}",

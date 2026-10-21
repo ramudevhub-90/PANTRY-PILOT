@@ -306,7 +306,8 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
         food"), ingredients to avoid (allergies, dislikes) and where they live ("we're in Pune" =
         "Pune, Maharashtra, India"), and the food they grew up with when it differs from where they
         live ("we're Bengali" in Bengaluru = home_cuisine "Bengali"; "local" = same as where they
-        live), and the language to reply in ("talk to me in Bengali" = language "Bengali"). Only the
+        live), and the language to reply in ("talk to me in Bengali" = language "Bengali"; "reply in
+        whatever language I speak" = "Auto"). Only the
         fields given change; pass an empty list to clear
         cuisines or avoid, or an empty location to go back to the time zone's country."""
         household = load()
@@ -323,7 +324,12 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
             prefs.home_cuisine = home_cuisine.strip()[:40]
         if language is not None:
             name = language.strip().lower()
-            prefs.language = "English" if name in ("", "en", "eng", "english", "default") else name.title()[:24]
+            if name in ("", "en", "eng", "english", "default"):
+                prefs.language = "English"
+            elif name in ("auto", "same", "same as i speak", "same as me", "any"):
+                prefs.language = "Auto"
+            else:
+                prefs.language = name.title()[:24]
         if region is not None:
             prefs.region = "" if region == "auto" else region
         save(household)
@@ -331,7 +337,9 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
         if prefs.home_cuisine and prefs.home_cuisine.lower() != "local":
             parts.append(f"{prefs.home_cuisine} home food")
         parts.append(prefs.diet if prefs.diet != "any" else "any diet")
-        if prefs.language.lower() != "english":
+        if prefs.language.lower() == "auto":
+            parts.append("replies in the language you speak")
+        elif prefs.language.lower() != "english":
             parts.append(f"replies in {prefs.language}")
         if prefs.cuisines:
             parts.append(", ".join(prefs.cuisines))

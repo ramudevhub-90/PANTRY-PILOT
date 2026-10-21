@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HAS_SERVER, api } from '../agent/remote';
-import { POLLY_CODES, replyLanguage } from '../lib/language';
+import { POLLY_CODES, scriptLanguage } from '../lib/language';
 import { speechLanguage } from './useHandsFree';
 
 // Minimal typings for the Web Speech API, which TypeScript's DOM lib doesn't fully cover.
@@ -45,7 +45,8 @@ export function useSpeechRecognition(onFinal: (text: string) => void) {
   const start = useCallback(() => {
     if (!Ctor || recRef.current) return;
     const rec = new Ctor();
-    rec.lang = speechLanguage();
+    const listenIn = speechLanguage();
+    rec.lang = listenIn === 'auto' ? 'en-IN' : listenIn;
     rec.interimResults = true;
     rec.continuous = false;
     let finalText = '';
@@ -163,11 +164,13 @@ export function speak(text: string, onEnd: () => void) {
     restore();
     if (report) onEnd();
   };
-  const lang = replyLanguage();
-  // Polly's Kajal speaks English and Hindi; for Bengali, Tamil and the rest the phone's own voice
-  // reads the text when it has one for that language.
-  if (player && POLLY_CODES.has(lang.code)) speakWithPolly(text, finish, lang.code === 'hi-IN' ? 'hi-IN' : speechLanguage());
-  else speakWithBrowser(text, finish, lang.code === 'en-IN' ? undefined : lang.code);
+  // Speak in the language the reply is actually written in (with "Same as I speak" it can change
+  // every turn). Polly's Kajal speaks English and Hindi; for Bengali, Tamil and the rest the phone's
+  // own voice reads the text when it has one for that language.
+  const code = scriptLanguage(text);
+  const pollyLang = code === 'hi-IN' ? 'hi-IN' : speechLanguage() === 'auto' ? 'en-IN' : speechLanguage();
+  if (player && POLLY_CODES.has(code)) speakWithPolly(text, finish, pollyLang);
+  else speakWithBrowser(text, finish, code === 'en-IN' ? undefined : code);
 }
 
 function speakWithPolly(text: string, finish: (report?: boolean) => void, lang: string) {

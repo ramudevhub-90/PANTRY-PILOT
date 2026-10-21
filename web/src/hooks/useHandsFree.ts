@@ -80,6 +80,8 @@ function trusted(text: string, score: number, answering: boolean): boolean {
 export function speechLanguage(): string {
   // Hindi speakers are heard in Hindi; for other languages people mostly talk to Alexa in English.
   if (replyLanguage().code === 'hi-IN') return 'hi-IN';
+  // "Same as I speak": Transcribe tells English and Hindi apart by itself.
+  if (replyLanguage().code === 'auto') return 'auto';
   const lang = navigator.language || 'en-US';
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (lang === 'en-IN' || lang === 'hi-IN' || zone === 'Asia/Kolkata' || zone === 'Asia/Calcutta') return 'en-IN';

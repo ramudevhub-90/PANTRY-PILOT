@@ -69,11 +69,12 @@ _IDEAS = re.compile(
 
 _LANGUAGES = (
     "english", "hindi", "bengali", "bangla", "tamil", "telugu", "kannada", "malayalam", "marathi",
-    "gujarati", "punjabi", "odia", "oriya",
+    "gujarati", "punjabi", "odia", "oriya", "auto",
 )
 _ASK_LANGUAGE = re.compile(
     rf"\b(?:talk|speak|reply|answer|respond|switch(?: back)?)\b[^.?!]{{0,20}}?\b(?:in|to)\s+({'|'.join(_LANGUAGES)})\b|"
-    rf"\bback to ({'|'.join(_LANGUAGES)})\b",
+    rf"\bback to ({'|'.join(_LANGUAGES)})\b|"
+    r"\b(?:same language (?:as|that) (?:i|me)|whatever language i (?:speak|use)|language i(?:'m| am) (?:speaking|using))\b",
     re.I,
 )
 
@@ -83,8 +84,10 @@ def requested_language(text: str) -> str | None:
     m = _ASK_LANGUAGE.search(text)
     if not m:
         return None
+    if not (m.group(1) or m.group(2)):
+        return "Auto"  # "reply in the same language as me"
     name = (m.group(1) or m.group(2)).lower()
-    return {"bangla": "Bengali", "oriya": "Odia"}.get(name, name.title())
+    return {"bangla": "Bengali", "oriya": "Odia", "auto": "Auto"}.get(name, name.title())
 
 
 def wants_meal_ideas(text: str) -> bool:
@@ -153,7 +156,13 @@ async def run_agent(
     ]
     now = local_now()
     system = SYSTEM_PROMPT.format(now=now.strftime("%A %d %B %Y, %I:%M %p"), occasion=occasion_at(now))
-    if language.strip().lower() not in ("", "english"):
+    if language.strip().lower() == "auto":
+        system += (
+            "\n- Reply in the same language and script as the user's latest message (English, Hindi, "
+            "Bengali, Hinglish...); if they switch language, switch with them. Keep product names and "
+            "numbers as they are, and pass item names to tools in English."
+        )
+    elif language.strip().lower() not in ("", "english"):
         system += (
             f"\n- Always reply in {language} (in its own script), even if the user writes in English; keep "
             "product names and numbers as they are. Pass item names to tools in English."
