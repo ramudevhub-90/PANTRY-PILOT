@@ -15,8 +15,11 @@ from .models import FoodPreferences, Meal, MealTimer, PantryItem
 SUGGEST_PROMPT = """You are a home cook in {place} planning {occasion} from this household's pantry.
 Suggest {count} different dishes that people in {place} really cook at home for {occasion}{cuisine_note}.
 {occasion_note}
-Strictly follow the household's diet and never use ingredients they avoid. Use up food that expires
-soonest first; it is fine to need one or two cheap extra ingredients. Assume basic staples (salt,
+Strictly follow the household's diet and never use ingredients they avoid. Every dish must really be
+the dish its name says: its main ingredient must be in the pantry, and its steps must cook that dish
+(never give a prawn dish's name to an egg recipe). Use up food that expires soonest first, but only
+when it suits the dish and cuisine; leave out expiring items that don't fit. It is fine to need one or
+two cheap extra ingredients, never the main one. Assume basic staples (salt,
 water, cooking oil, common spices for the cuisine) are available. Never repeat a dish already
 suggested. Give 3 to 6 short steps, one sentence each.
 Report the dishes with the suggest_meals tool."""
@@ -84,10 +87,14 @@ SUGGEST_TOOL: dict[str, Any] = {
                                     "description": "Ingredients needed that are not in the pantry (not staples).",
                                 },
                                 "steps": {"type": "array", "items": {"type": "string"}},
+                                "main_ingredient": {
+                                    "type": "string",
+                                    "description": "The ingredient the dish is named for (prawns for chingri malai, lentils for dal).",
+                                },
                                 "timer_label": {"type": "string", "description": "What a kitchen timer is for, e.g. rice."},
                                 "timer_minutes": {"type": "integer"},
                             },
-                            "required": ["name", "emoji", "minutes", "servings", "uses", "missing", "steps"],
+                            "required": ["name", "emoji", "minutes", "servings", "main_ingredient", "uses", "missing", "steps"],
                         },
                     }
                 },
@@ -182,6 +189,12 @@ def _join(names: list[str]) -> str:
     return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
+def _mentions(steps: list[str], ingredient: str) -> bool:
+    """Some word of the ingredient appears in the steps (so "red lentils" counts for "add the lentils")."""
+    words = _words(ingredient) - _GENERIC or _words(ingredient)
+    return bool(words & _words(" ".join(steps)))
+
+
 def _words(text: str) -> set[str]:
     return {w.rstrip("s") for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 2}
 
@@ -224,6 +237,10 @@ def to_meals(
             continue
         mentioned = [name, *map(str, dish.get("uses") or []), *map(str, dish.get("missing") or [])]
         if any(avoided(m, preferences) for m in mentioned):
+            continue
+        # The dish must be what its name says: its main ingredient is in stock and in its steps.
+        main = str(dish.get("main_ingredient") or "").strip()
+        if main and (not _pantry_item(inventory, main) or not _mentions(steps, main)):
             continue
         uses: list[PantryItem] = []
         for wanted in dish.get("uses") or []:

@@ -59,6 +59,21 @@ def in_us(now: Any) -> bool:
 _THINKING = re.compile(r"<thinking>.*?</thinking>", re.S)
 
 
+_MEAL = re.compile(r"\b(breakfast|brunch|lunch|dinner|supper|snacks?|tiffin|meal)\b", re.I)
+_IDEAS = re.compile(
+    r"\b(ideas?|suggest\w*|what (can|should|could) (i|we) (make|cook|eat|have)|recipes?|plan|cook|make|options?|"
+    r"something (else|different))\b",
+    re.I,
+)
+
+
+def wants_meal_ideas(text: str) -> bool:
+    """"Breakfast ideas?", "what can I make for dinner", or a short answer like "dinner please"."""
+    if not _MEAL.search(text):
+        return False
+    return bool(_IDEAS.search(text)) or len(text.split()) <= 4
+
+
 def plain(text: str) -> str:
     """Replies are spoken and shown as plain text, but Nova sometimes adds markdown anyway."""
     text = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: m.group(1) or m.group(2), text)
@@ -125,8 +140,14 @@ async def run_agent(
         )
     messages: list[dict[str, Any]] = [*history, {"role": "user", "content": [{"text": text}]}]
 
-    for _ in range(max_steps):
-        response = await anyio.to_thread.run_sync(lambda: nova.converse(system=system, messages=messages, tools=tools))
+    # Meal questions always get a fresh plan: answering from the chat history replayed stale dishes.
+    force_plan = wants_meal_ideas(text) and any(t["toolSpec"]["name"] == "plan_meals" for t in tools)
+
+    for step in range(max_steps):
+        choice = {"tool": {"name": "plan_meals"}} if force_plan and step == 0 else None
+        response = await anyio.to_thread.run_sync(
+            lambda: nova.converse(system=system, messages=messages, tools=tools, tool_choice=choice)
+        )
         message = response["output"]["message"]
         messages.append(message)
         uses = [block["toolUse"] for block in message["content"] if "toolUse" in block]

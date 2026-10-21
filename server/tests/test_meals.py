@@ -233,3 +233,25 @@ def test_switching_back_to_english():
     store = MemoryStore()
     call_tool(store, "set_food_preferences", {"language": "Bengali"})
     assert call_tool(store, "set_food_preferences", {"language": "english"})["preferences"]["language"] == "English"
+
+
+def test_dish_whose_main_ingredient_is_missing_or_not_cooked_is_dropped():
+    from pantry_pilot.meal_ideas import to_meals
+    from pantry_pilot.models import seed_household
+
+    inventory = seed_household().inventory
+    fake_chingri = {**POHA, "name": "Chingri Malai", "main_ingredient": "prawns", "steps": ["Whisk eggs.", "Add cheddar."]}
+    egg_named_wrong = {**POHA, "name": "Dimer Jhol", "main_ingredient": "eggs", "steps": ["Boil potatoes.", "Fry onions."]}
+    real = {**POHA, "name": "Dimer Jhol (egg curry)", "main_ingredient": "eggs", "steps": ["Boil the eggs.", "Simmer in the curry."]}
+    meals = to_meals([fake_chingri, egg_named_wrong, real], inventory, 3)
+    assert [m.name for m in meals] == ["Dimer Jhol (egg curry)"]
+
+
+def test_meal_questions_force_a_fresh_plan():
+    from pantry_pilot.agent import wants_meal_ideas
+
+    assert wants_meal_ideas("Breakfast ideas? Something our baby can eat too.")
+    assert wants_meal_ideas("What can I make for dinner tonight with what we have?")
+    assert wants_meal_ideas("dinner please")
+    assert not wants_meal_ideas("What can I make?")  # meal unknown: Alexa asks first
+    assert not wants_meal_ideas("Set a 10 minute timer for the dinner rice so it doesn't burn")
