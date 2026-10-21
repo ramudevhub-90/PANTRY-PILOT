@@ -34,6 +34,10 @@ How to work:
 - When the user agrees to an offer you made ("yes", "sure"), do it.
 - Timers: set_timer starts one, cancel_timer stops them ("stop the timer").
 - Only say you did something after the tool for it succeeded; never claim an action you didn't take.
+- Missing ingredients: say only the ones plan_meals lists as missing; never call something missing
+  that the pantry has.
+- To change the reply language ("talk to me in Hindi", "back to English"), call
+  set_food_preferences with language set to that language, e.g. "English".
 - Shopping (India): "where is my list cheapest?" -> compare_grocery_prices, then name the cheapest
   app and total. "Order it from Zepto/Swiggy" -> prepare_order, then read its `readback` word for
   word and stop. Call place_order only when the user's latest message itself says "place the order"
@@ -53,6 +57,14 @@ def in_us(now: Any) -> bool:
     zone = str(getattr(now, "tzinfo", "") or "")
     return zone.startswith("America/") or zone in {"Pacific/Honolulu", "US/Eastern", "US/Central", "US/Mountain", "US/Pacific"}
 _THINKING = re.compile(r"<thinking>.*?</thinking>", re.S)
+
+
+def plain(text: str) -> str:
+    """Replies are spoken and shown as plain text, but Nova sometimes adds markdown anyway."""
+    text = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: m.group(1) or m.group(2), text)
+    text = re.sub(r"(?<!\w)[*_](\S(?:.*?\S)?)[*_](?!\w)", r"\1", text)
+    text = re.sub(r"^\s*(?:[-*•]|#{1,6})\s+", "", text, flags=re.M)
+    return re.sub(r"`([^`]*)`", r"\1", text)
 
 
 def tool_summary(result: Any) -> tuple[dict[str, Any], str]:
@@ -120,7 +132,7 @@ async def run_agent(
         uses = [block["toolUse"] for block in message["content"] if "toolUse" in block]
 
         if not uses:
-            reply = _THINKING.sub("", " ".join(b["text"] for b in message["content"] if "text" in b)).strip()
+            reply = plain(_THINKING.sub("", " ".join(b["text"] for b in message["content"] if "text" in b)).strip())
             history.extend([messages[len(history)], {"role": "assistant", "content": [{"text": reply}]}])
             del history[:-12]  # keep the last six exchanges
             yield {"type": "reply", "text": reply}

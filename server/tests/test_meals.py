@@ -218,3 +218,18 @@ def test_meat_emoji_on_a_vegetarian_dish_is_replaced():
     assert dish_emoji("Chicken Kosha", "🍗") == "🍗"
     assert dish_emoji("Aloo Posto", "🥔") == "🥔"
     assert dish_emoji("Masoor Dal", "") == "🍛"
+
+
+def test_cheddar_cheese_is_the_cheddar_in_the_pantry():
+    from pantry_pilot.meal_ideas import _pantry_item
+    from pantry_pilot.models import seed_household
+
+    inventory = seed_household().inventory
+    assert _pantry_item(inventory, "cheddar cheese").name == "Cheddar"
+    assert _pantry_item(inventory, "unicorn dust") is None
+
+
+def test_switching_back_to_english():
+    store = MemoryStore()
+    call_tool(store, "set_food_preferences", {"language": "Bengali"})
+    assert call_tool(store, "set_food_preferences", {"language": "english"})["preferences"]["language"] == "English"

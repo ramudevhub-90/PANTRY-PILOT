@@ -46,6 +46,8 @@ export function AssistantPanel() {
     e.preventDefault();
     const text = draft.trim();
     if (!text || busy) return;
+    handsFree.dismissError();
+    speech.dismissError();
     setDraft('');
     void ask(text);
   }

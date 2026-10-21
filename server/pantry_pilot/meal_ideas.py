@@ -141,6 +141,13 @@ def suggest_request(
             f". They grew up eating {home} food: mostly suggest {home} home cooking, with an "
             "occasional local favourite, using ingredients easy to buy where they live"
         )
+    if home and home.lower() != "local":
+        cuisine_note += (
+            f". Suggest real, traditional {home} dishes by their usual names (e.g. the dish a {home} "
+            "family would actually call it), with a short English description in brackets. Never invent "
+            f"\"{home}-Style <foreign dish>\" fusions such as pasta or stir-fries; skip pantry items that "
+            "don't belong in that cuisine and pick the expiring ones that do"
+        )
     elif preferences.location.strip():
         cuisine_note = ", in the home-style cuisine of that city and state"
     else:
@@ -175,13 +182,27 @@ def _join(names: list[str]) -> str:
     return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
+def _words(text: str) -> set[str]:
+    return {w.rstrip("s") for w in re.findall(r"[a-z]+", text.lower()) if len(w) > 2}
+
+
+_GENERIC = {"fresh", "red", "green", "white", "black", "cheese", "oil", "powder", "leave", "baby", "whole", "dried"}
+
+
 def _pantry_item(inventory: list[PantryItem], name: str) -> PantryItem | None:
+    """The pantry item this ingredient refers to: same name, one name inside the other, or a shared
+    specific word ("cheddar cheese" is the Cheddar on the shelf; "red lentils" are Masoor dal's lentils)."""
     key = name.strip().lower()
     if not key:
         return None
-    return next((i for i in inventory if i.name.lower() == key), None) or next(
-        (i for i in inventory if key in i.name.lower() or i.name.lower() in key), None
-    )
+    exact = next((i for i in inventory if i.name.lower() == key), None)
+    if exact:
+        return exact
+    contained = next((i for i in inventory if key in i.name.lower() or i.name.lower() in key), None)
+    if contained:
+        return contained
+    wanted = _words(key) - _GENERIC
+    return next((i for i in inventory if wanted & (_words(i.name) - _GENERIC)), None)
 
 
 def to_meals(

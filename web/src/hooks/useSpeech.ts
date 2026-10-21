@@ -75,7 +75,9 @@ export function useSpeechRecognition(onFinal: (text: string) => void) {
 
   useEffect(() => () => recRef.current?.abort(), []);
 
-  return { supported: Boolean(Ctor), listening, interim, error, start, stop };
+  const dismissError = useCallback(() => setError(null), []);
+
+  return { supported: Boolean(Ctor), listening, interim, error, start, stop, dismissError };
 }
 
 export const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window;

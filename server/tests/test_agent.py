@@ -159,3 +159,11 @@ def test_old_conversation_starts_fresh(store, monkeypatch):
     with TestClient(create_app(store, nova, "alice")) as client:
         turn(client, {"text": "Hi"})
     assert [m["content"][0]["text"] for m in nova.calls[0]["messages"]] == ["Hi"]
+
+
+def test_markdown_is_stripped_from_spoken_replies():
+    from pantry_pilot.agent import plain
+
+    assert plain("Top dinner pick: **Masoor Dal** with *rice*.") == "Top dinner pick: Masoor Dal with rice."
+    assert plain("- Start the timer\n- `rice`") == "Start the timer\nrice"
+    assert plain("2 * 3 = 6") == "2 * 3 = 6"

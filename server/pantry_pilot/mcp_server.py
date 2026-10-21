@@ -322,7 +322,8 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
         if home_cuisine is not None:
             prefs.home_cuisine = home_cuisine.strip()[:40]
         if language is not None:
-            prefs.language = language.strip().title()[:24] or "English"
+            name = language.strip().lower()
+            prefs.language = "English" if name in ("", "en", "eng", "english", "default") else name.title()[:24]
         if region is not None:
             prefs.region = "" if region == "auto" else region
         save(household)

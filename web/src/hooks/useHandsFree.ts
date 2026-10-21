@@ -310,5 +310,8 @@ export function useHandsFree(onCommand: (text: string) => void, paused: boolean)
 
   useEffect(() => () => stop(), [stop]);
 
-  return { supported: handsFreeSupported, phase, interim, error, start, stop, expectAnswer };
+  /** Forget an old error (e.g. "Microphone access was blocked") once the user carries on by typing. */
+  const dismissError = useCallback(() => setError(null), []);
+
+  return { supported: handsFreeSupported, phase, interim, error, start, stop, expectAnswer, dismissError };
 }

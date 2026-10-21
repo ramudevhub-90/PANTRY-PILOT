@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -71,6 +72,7 @@ log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 
 CHAT_KEEP_SECONDS = 30 * 60
+HEARTBEAT_SECONDS = 10
 """A conversation older than this starts fresh."""
 
 
@@ -206,14 +208,34 @@ def create_app(
         Body: {text} for chat, {images|video|document, kind} to scan, or {confirmItems} to save a scan."""
         body = await request.json()
 
-        async def events() -> AsyncIterator[str]:
-            # Set before the MCP client starts, so its tool calls (place_order) see this turn's words.
-            turn = ordering.current_turn.set({"id": new_id(), "text": str(body.get("text", "")).strip()})
+        async def produce(queue: asyncio.Queue[str | None]) -> None:
             try:
                 async with Client(mcp) as client:
                     async for event in _turn_events(body, client):
-                        yield f"data: {json.dumps(event)}\n\n"
+                        await queue.put(f"data: {json.dumps(event)}\n\n")
             finally:
+                await queue.put(None)
+
+        async def events() -> AsyncIterator[str]:
+            # Set before the MCP client starts, so its tool calls (place_order) see this turn's words.
+            turn = ordering.current_turn.set({"id": new_id(), "text": str(body.get("text", "")).strip()})
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+            task = asyncio.create_task(produce(queue))
+            try:
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(queue.get(), HEARTBEAT_SECONDS)
+                    except TimeoutError:
+                        # A long step (Nova inventing dishes, a shopping app) must not leave the
+                        # connection silent, or CloudFront gives up and the app shows "offline".
+                        yield ": still working\n\n"
+                        continue
+                    if chunk is None:
+                        break
+                    yield chunk
+                await task  # re-raise anything the turn failed with
+            finally:
+                task.cancel()
                 ordering.current_turn.reset(turn)
             household = json.loads(dumps_for_api(store.load(household_id_now())))
             yield f"data: {json.dumps({'type': 'state', 'state': household})}\n\n"
