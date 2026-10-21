@@ -105,6 +105,8 @@ class FoodPreferences(ApiModel):
     """Ingredients never to use (allergies, dislikes)."""
     location: str = ""
     """City and region, e.g. "Bengaluru, Karnataka, India". Empty: the country from the time zone."""
+    language: str = "English"
+    """Language for replies and meal ideas (English, Hindi, Bengali, Tamil...). Pantry names stay as they are."""
     home_cuisine: str = ""
     """The food the household grew up with ("Bengali"), which can differ from where they live now:
     people move for work. Empty: not asked yet; "local" means the same as where they live."""

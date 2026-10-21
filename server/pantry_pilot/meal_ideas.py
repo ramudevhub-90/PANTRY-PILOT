@@ -138,6 +138,12 @@ def suggest_request(
         cuisine_note = ", in the home-style cuisine of that city and state"
     else:
         cuisine_note = ", in the local home-style cuisine"
+    if preferences.language.strip().lower() not in ("", "english"):
+        cuisine_note += (
+            f". Write each dish name, its steps and the timer label in {preferences.language}, with the "
+            "English dish name in brackets after the name; keep `uses` and `missing` exactly as the pantry "
+            "lists them"
+        )
     system = SUGGEST_PROMPT.format(
         place=preferences.location.strip() or place_for(zone),
         occasion=occasion,

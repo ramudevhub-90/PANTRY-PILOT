@@ -105,4 +105,6 @@ export interface FoodPreferences {
   location: string;
   /** Food they grew up with ("Bengali"), when it differs from where they live; "local" = same. */
   homeCuisine: string;
+  /** Language for replies and meal ideas, e.g. "Bengali". */
+  language: string;
 }

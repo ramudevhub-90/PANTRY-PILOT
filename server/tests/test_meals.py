@@ -191,3 +191,12 @@ def test_planner_asks_for_home_food_until_it_is_known():
     assert plan(store, MockNova(), {"meal": "lunch"})["ask_home_cuisine"] is True
     call_tool(store, "set_food_preferences", {"home_cuisine": "local"})
     assert "ask_home_cuisine" not in plan(store, MockNova(), {"meal": "lunch"})
+
+
+def test_reply_language_reaches_the_meal_prompt():
+    store = MemoryStore()
+    saved = call_tool(store, "set_food_preferences", {"language": "bengali"})
+    assert saved["preferences"]["language"] == "Bengali" and "replies in Bengali" in saved["summary"]
+    nova = IdeasNova([[POHA]])
+    plan(store, nova, {"meal": "dinner"})
+    assert "in Bengali, with the English dish name in brackets" in nova.requests[0][0]

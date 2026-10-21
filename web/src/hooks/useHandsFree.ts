@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { HAS_SERVER, api } from '../agent/remote';
 import { audioEvent, decodeMessage } from '../lib/eventstream';
+import { replyLanguage } from '../lib/language';
 
 // Hands-free voice in any browser: the microphone streams to Amazon Transcribe and we watch the
 // transcript for "Alexa". "Alexa, what's for dinner?" runs at once; a bare "Alexa" waits for the
@@ -77,6 +78,8 @@ function trusted(text: string, score: number, answering: boolean): boolean {
 /** The speech model to use. Browsers in India often report en-US or en-GB, so the time zone also
  * counts: the Indian English model understands Indian accents far better than the US one. */
 export function speechLanguage(): string {
+  // Hindi speakers are heard in Hindi; for other languages people mostly talk to Alexa in English.
+  if (replyLanguage().code === 'hi-IN') return 'hi-IN';
   const lang = navigator.language || 'en-US';
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (lang === 'en-IN' || lang === 'hi-IN' || zone === 'Asia/Kolkata' || zone === 'Asia/Calcutta') return 'en-IN';

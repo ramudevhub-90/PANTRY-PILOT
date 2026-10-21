@@ -73,7 +73,7 @@ class Speaker:
         if key in self._cache:
             self._cache.move_to_end(key)
             return self._cache[key]
-        audio = self._synthesize(text, POLLY_VOICES[language], "en-IN" if language == "hi-IN" else language)
+        audio = self._synthesize(text, POLLY_VOICES[language], language)  # Kajal speaks en-IN and hi-IN
         self._cache[key] = audio
         if len(self._cache) > CACHE_ENTRIES:
             self._cache.popitem(last=False)

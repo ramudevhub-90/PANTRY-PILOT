@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HAS_SERVER, api } from '../agent/remote';
+import { POLLY_CODES, replyLanguage } from '../lib/language';
 import { speechLanguage } from './useHandsFree';
 
 // Minimal typings for the Web Speech API, which TypeScript's DOM lib doesn't fully cover.
@@ -130,6 +131,13 @@ function pickVoice(): SpeechSynthesisVoice | undefined {
   return voices.find((v) => preferred.includes(v.name)) ?? voices.find((v) => v.lang === 'en-US');
 }
 
+/** A voice for this language (e.g. bn-IN), or any voice for the base language (bn). */
+function pickVoiceFor(lang: string): SpeechSynthesisVoice | undefined {
+  const voices = window.speechSynthesis.getVoices();
+  const base = lang.split('-')[0];
+  return voices.find((v) => v.lang.replace('_', '-') === lang) ?? voices.find((v) => v.lang.startsWith(base));
+}
+
 /** While the microphone is open (hands-free), iPhones play page audio through the quiet earpiece.
  * A "playback" audio session sends it to the loudspeaker; returns a function that restores it. */
 function loudspeaker(): () => void {
@@ -153,11 +161,14 @@ export function speak(text: string, onEnd: () => void) {
     restore();
     if (report) onEnd();
   };
-  if (player) speakWithPolly(text, finish);
-  else speakWithBrowser(text, finish);
+  const lang = replyLanguage();
+  // Polly's Kajal speaks English and Hindi; for Bengali, Tamil and the rest the phone's own voice
+  // reads the text when it has one for that language.
+  if (player && POLLY_CODES.has(lang.code)) speakWithPolly(text, finish, lang.code === 'hi-IN' ? 'hi-IN' : speechLanguage());
+  else speakWithBrowser(text, finish, lang.code === 'en-IN' ? undefined : lang.code);
 }
 
-function speakWithPolly(text: string, finish: (report?: boolean) => void) {
+function speakWithPolly(text: string, finish: (report?: boolean) => void, lang: string) {
   const audio = player!;
   let cancelled = false;
   let url: string | null = null;
@@ -175,10 +186,10 @@ function speakWithPolly(text: string, finish: (report?: boolean) => void) {
   };
   const fallback = () => {
     cleanup();
-    if (!cancelled) speakWithBrowser(text, finish);
+    if (!cancelled) speakWithBrowser(text, finish, lang === 'hi-IN' ? lang : undefined);
   };
   api
-    .speech(text, speechLanguage())
+    .speech(text, lang)
     .then((blob) => {
       if (cancelled) return;
       url = URL.createObjectURL(blob);
@@ -193,7 +204,7 @@ function speakWithPolly(text: string, finish: (report?: boolean) => void) {
     .catch(fallback);
 }
 
-function speakWithBrowser(text: string, finish: (report?: boolean) => void) {
+function speakWithBrowser(text: string, finish: (report?: boolean) => void, lang?: string) {
   if (!canSpeak) {
     finish();
     return;
@@ -204,8 +215,9 @@ function speakWithBrowser(text: string, finish: (report?: boolean) => void) {
   const busy = synth.speaking || synth.pending;
   if (busy) synth.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
-  const voice = pickVoice();
+  const voice = lang ? pickVoiceFor(lang) : pickVoice();
   if (voice) utterance.voice = voice;
+  if (lang) utterance.lang = lang;
   utterance.rate = 1.05;
 
   // Some browsers (and embedded webviews) never fire `end`, so cap it by an estimated duration.

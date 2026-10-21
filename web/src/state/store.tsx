@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import { HAS_SERVER, api, type ServerState } from '../agent/remote';
 import { seedInventory } from '../data/seed';
 import { daysUntil, uid } from '../lib/format';
+import { setReplyLanguage } from '../lib/language';
 import type {
   AssistantMode,
   ChatMessage,
@@ -60,7 +61,7 @@ function initialState(): PantryState {
     meals: [],
     grocery: [],
     timers: [],
-    preferences: { diet: 'any', cuisines: [], avoid: [], location: '', homeCuisine: '' },
+    preferences: { diet: 'any', cuisines: [], avoid: [], location: '', homeCuisine: '', language: 'English' },
     notifications: { whatsapp: '' },
     messages: [],
     mode: 'idle',
@@ -186,6 +187,7 @@ const PantryContext = createContext<PantryContextValue | null>(null);
 
 export function PantryProvider({ children }: { children: ReactNode }) {
   const [state, reactDispatch] = useReducer(reducer, undefined, initialState);
+  useEffect(() => setReplyLanguage(state.preferences.language), [state.preferences.language]);
   const stateRef = useRef(state);
 
   // Mirror every action into a ref so a chain of agent tool calls sees its own writes

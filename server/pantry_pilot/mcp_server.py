@@ -298,13 +298,15 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
         avoid: list[str] | None = None,
         location: str | None = None,
         home_cuisine: str | None = None,
+        language: str | None = None,
     ) -> dict[str, Any]:
         """Remember what the household eats, so meal ideas follow it: diet ("we're vegetarian",
         "we eat eggs but no meat" = eggetarian, "Jain"), favourite cuisines ("we like South Indian
         food"), ingredients to avoid (allergies, dislikes) and where they live ("we're in Pune" =
         "Pune, Maharashtra, India"), and the food they grew up with when it differs from where they
         live ("we're Bengali" in Bengaluru = home_cuisine "Bengali"; "local" = same as where they
-        live). Only the fields given change; pass an empty list to clear
+        live), and the language to reply in ("talk to me in Bengali" = language "Bengali"). Only the
+        fields given change; pass an empty list to clear
         cuisines or avoid, or an empty location to go back to the time zone's country."""
         household = load()
         prefs = household.preferences
@@ -318,11 +320,15 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
             prefs.location = location.strip()[:80]
         if home_cuisine is not None:
             prefs.home_cuisine = home_cuisine.strip()[:40]
+        if language is not None:
+            prefs.language = language.strip().title()[:24] or "English"
         save(household)
         parts = [prefs.location] if prefs.location else []
         if prefs.home_cuisine and prefs.home_cuisine.lower() != "local":
             parts.append(f"{prefs.home_cuisine} home food")
         parts.append(prefs.diet if prefs.diet != "any" else "any diet")
+        if prefs.language.lower() != "english":
+            parts.append(f"replies in {prefs.language}")
         if prefs.cuisines:
             parts.append(", ".join(prefs.cuisines))
         if prefs.avoid:

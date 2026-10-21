@@ -92,6 +92,7 @@ async def run_agent(
     client: Client,
     nova: Nova,
     max_steps: int = 6,
+    language: str = "English",
 ) -> AsyncIterator[dict[str, Any]]:
     """One user turn: loop Nova -> MCP tools until Nova answers in words."""
     listed = await client.list_tools()
@@ -103,6 +104,11 @@ async def run_agent(
     ]
     now = local_now()
     system = SYSTEM_PROMPT.format(now=now.strftime("%A %d %B %Y, %I:%M %p"), occasion=occasion_at(now))
+    if language.strip().lower() not in ("", "english"):
+        system += (
+            f"\n- Always reply in {language} (in its own script), even if the user writes in English; keep "
+            "product names and numbers as they are. Pass item names to tools in English."
+        )
     messages: list[dict[str, Any]] = [*history, {"role": "user", "content": [{"text": text}]}]
 
     for _ in range(max_steps):

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { House, LocateFixed, MapPin, SlidersHorizontal, X } from 'lucide-react';
+import { House, Languages, LocateFixed, MapPin, SlidersHorizontal, X } from 'lucide-react';
 import { HAS_SERVER, api } from '../agent/remote';
 import { deviceCity } from '../lib/geo';
+import { POLLY_CODES, REPLY_LANGUAGES } from '../lib/language';
 import { currentOccasion, deviceTimeZone, placeForZone } from '../lib/mealtime';
 import { usePantry } from '../state/store';
 import type { Diet } from '../types';
@@ -72,6 +73,7 @@ export function FoodPreferences() {
   const [avoid, setAvoid] = useState('');
   const [location, setLocation] = useState('');
   const [homeCuisine, setHomeCuisine] = useState('');
+  const [language, setLanguage] = useState('English');
   const [homeDismissed, setHomeDismissed] = useState(homeAskedBefore);
   const [saving, setSaving] = useState(false);
   const [locating, setLocating] = useState(false);
@@ -145,6 +147,7 @@ export function FoodPreferences() {
     setAvoid(prefs.avoid.join(', '));
     setLocation(prefs.location);
     setHomeCuisine(prefs.homeCuisine === 'local' ? '' : prefs.homeCuisine);
+    setLanguage(prefs.language || 'English');
     setError(null);
     setEditing(true);
   }
@@ -160,6 +163,7 @@ export function FoodPreferences() {
         avoid: list(avoid),
         location: location.trim(),
         homeCuisine: homeCuisine.trim() || (prefs.homeCuisine ? 'local' : ''),
+        language,
       });
       setEditing(false);
     } catch {
@@ -212,6 +216,12 @@ export function FoodPreferences() {
           {place}
           {placeNote}
         </span>
+        {prefs.language && prefs.language !== 'English' && (
+          <span className="prefs__place prefs__home" title={`Replies in ${prefs.language}`}>
+            <Languages size={13} aria-hidden="true" />
+            {prefs.language}
+          </span>
+        )}
         {home && (
           <span className="prefs__place prefs__home" title={`Mostly ${home} home cooking`}>
             <House size={13} aria-hidden="true" />
@@ -244,6 +254,17 @@ export function FoodPreferences() {
       <label>
         Food you grew up with
         <input value={homeCuisine} onChange={(e) => setHomeCuisine(e.target.value)} placeholder="Bengali (leave empty for local food)" />
+      </label>
+      <label>
+        Reply language
+        <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+          {REPLY_LANGUAGES.map((l) => (
+            <option key={l.name} value={l.name}>
+              {l.name}
+              {POLLY_CODES.has(l.code) ? '' : ' (text; voice if your phone has it)'}
+            </option>
+          ))}
+        </select>
       </label>
       <label>
         Diet
