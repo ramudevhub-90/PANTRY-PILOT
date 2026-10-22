@@ -229,7 +229,9 @@ def protected_resource_metadata(request: Request) -> JSONResponse:
     return JSONResponse({
         "resource": f"{base}/mcp",
         "authorization_servers": [base],
-        "scopes_supported": list(ALL_SCOPES),
+        # People's clients (Claude, Alexa+ account linking) ask for these; the service scope is only
+        # for Alexa+'s machine-to-machine client and would make their sign-in fail.
+        "scopes_supported": list(USER_SCOPES),
         "bearer_methods_supported": ["header"],
         "resource_name": "Pantry Pilot",
     })

@@ -164,6 +164,19 @@ export class PantryPilotStack extends cdk.Stack {
         callbackUrls: ['http://localhost/callback', 'http://localhost:6274/oauth/callback', 'http://127.0.0.1/callback'],
       },
     });
+    // Claude (claude.ai custom connector) and other MCP clients: public client with PKCE, no secret,
+    // so judges paste only the client ID into Claude → Settings → Connectors → Advanced settings.
+    const claudeClient = users.addClient('ClaudeClient', {
+      userPoolClientName: 'claude-connector',
+      generateSecret: false,
+      oAuth: {
+        flows: { authorizationCodeGrant: true },
+        scopes: userOAuthScopes,
+        callbackUrls: ['https://claude.ai/api/mcp/auth_callback', 'https://claude.com/api/mcp/auth_callback'],
+      },
+      accessTokenValidity: cdk.Duration.hours(1),
+      refreshTokenValidity: cdk.Duration.days(30),
+    });
     // The web app's own sign-in: emailed one-time codes (custom auth), plus password for the judges'
     // demo account. Public client: a browser can't keep a secret. Users who link Alexa+ with the
     // same login share one pantry.
@@ -361,6 +374,10 @@ export class PantryPilotStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'UserPoolId', { value: users.userPoolId });
     new cdk.CfnOutput(this, 'LoginDomain', { value: loginDomain.baseUrl() });
     new cdk.CfnOutput(this, 'AlexaClientId', { value: alexaClient.userPoolClientId });
+    new cdk.CfnOutput(this, 'ClaudeConnectorClientId', {
+      value: claudeClient.userPoolClientId,
+      description: 'OAuth Client ID for adding https://<domain>/mcp as a Claude custom connector',
+    });
     new cdk.CfnOutput(this, 'DevClientId', { value: devClient.userPoolClientId });
     new cdk.CfnOutput(this, 'WebClientId', { value: webClient.userPoolClientId });
     new cdk.CfnOutput(this, 'ServiceClientId', { value: serviceClient.userPoolClientId });
