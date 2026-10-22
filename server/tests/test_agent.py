@@ -65,6 +65,16 @@ def test_agent_calls_mcp_tools_then_replies(store):
     assert tool_result["toolUseId"] == "t1" and "items" in tool_result["content"][0]["json"]
 
 
+def test_long_conversations_keep_saving_the_latest_turn(store):
+    # The history holds 12 messages; once full, each turn replaces the oldest exchange.
+    nova = ScriptedNova([text(f"Reply {i}") for i in range(9)])
+    with TestClient(create_app(store, nova, "test")) as client:
+        for i in range(9):
+            turn(client, {"text": f"Question {i}"})
+    texts = [c["text"] for m in nova.calls[-1]["messages"] for c in m["content"] if "text" in c]
+    assert "Reply 7" in texts and texts[-1] == "Question 8"
+
+
 def test_agent_remembers_the_conversation(store):
     nova = ScriptedNova([
         text("Want a 15-minute rice timer?"),

@@ -395,7 +395,9 @@ def create_app(
             return
         try:
             history = await anyio.to_thread.run_sync(load_chat)
-            before = len(history)
+            # Compare contents, not length: once the history is full (12 messages) each turn drops
+            # the oldest exchange, so the length stays the same and new turns were never saved.
+            before = list(history)
             try:
                 # "Talk to me in Bengali" is saved before the agent runs, so the reply (and any meal
                 # question in the same sentence) already uses the new language.
@@ -406,7 +408,7 @@ def create_app(
                 async for event in run_agent(text, history, client, nova, language=prefs.language, region=prefs.region):
                     yield event
             finally:
-                if len(history) != before:
+                if history != before:
                     record = {"messages": history, "at": time.time()}
                     await anyio.to_thread.run_sync(store.save_record, chat_key(), record)
         except NovaUnavailable as err:
