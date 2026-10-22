@@ -7,6 +7,7 @@ unavailable, the caller falls back to the fixed recipes in recipes.py.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any
 
@@ -190,7 +191,9 @@ def avoided(name: str, preferences: FoodPreferences) -> bool:
 
 
 def _slug(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:48] or "meal"
+    """A stable id from the name; names in other scripts (শাক রাতা) get a short hash instead."""
+    ascii_slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:48]
+    return ascii_slug or "meal-" + hashlib.sha256(name.strip().encode()).hexdigest()[:10]
 
 
 def _join(names: list[str]) -> str:
@@ -244,7 +247,7 @@ def to_meals(
         if plain and dish.get("name_matches_recipe") is False:
             name = plain  # a traditional name on a different recipe misleads; describe it instead
         steps = [str(s).strip() for s in dish.get("steps") or [] if str(s).strip()][:6]
-        if not name or not steps or _slug(name) in seen:
+        if not name or len(steps) < 2 or _slug(name) in seen:  # a one-line "recipe" is a truncated answer
             continue
         mentioned = [name, *map(str, dish.get("uses") or []), *map(str, dish.get("missing") or [])]
         if any(avoided(m, preferences) for m in mentioned):

@@ -244,7 +244,7 @@ def test_dish_whose_main_ingredient_is_missing_or_not_cooked_is_dropped():
                     "steps": ["Whisk eggs.", "Add cheddar."]}
     nothing_from_pantry = {**POHA, "name": "Mutton Kosha", "main_ingredient": "mutton", "uses": [], "steps": ["Cook."]}
     greens = {**POHA, "name": "Shak Bhaji (greens stir-fry)", "main_ingredient": "greens", "uses": ["Baby spinach"],
-              "steps": ["Wilt the spinach with garlic."]}
+              "steps": ["Fry the garlic.", "Wilt the spinach in it."]}
     real = {**POHA, "name": "Dimer Jhol (egg curry)", "main_ingredient": "eggs", "uses": ["Eggs"], "steps": ["Boil the eggs.", "Simmer in the curry."]}
     meals = to_meals([fake_chingri, nothing_from_pantry, greens, real], inventory, 3)
     assert [m.name for m in meals] == ["Shak Bhaji (greens stir-fry)", "Dimer Jhol (egg curry)"]
@@ -294,3 +294,12 @@ def test_spice_spellings_count_as_staples():
 
     assert all(_staple(s) for s in ["Turmeric powder", "Red chili powder", "cumin seeds", "Cloves"])
     assert not any(_staple(s) for s in ["Mustard oil", "Prawns", "Paneer"])
+
+
+def test_ids_for_other_scripts_and_truncated_recipes():
+    from pantry_pilot.meal_ideas import _slug, to_meals
+    from pantry_pilot.models import seed_household
+
+    assert _slug("শাক রাতা") != _slug("আলু পোস্ত") and _slug("শাক রাতা").startswith("meal-")
+    truncated = {**POHA, "name": "Lentil soup", "uses": ["Eggs"], "steps": ["Soak the lentils overnight."]}
+    assert to_meals([truncated], seed_household().inventory, 1) == []
