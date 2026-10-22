@@ -265,7 +265,10 @@ def to_meals(
             if item and item.days_left >= 0 and item not in uses:
                 uses.append(item)
         rescues = [i.name for i in uses if i.days_left <= 3]
-        missing = [str(m).strip() for m in dish.get("missing") or [] if str(m).strip() and not _pantry_item(inventory, str(m))]
+        missing = [
+            str(m).strip() for m in dish.get("missing") or []
+            if str(m).strip() and not _pantry_item(inventory, str(m)) and not _staple(str(m))
+        ]
         if rescues:
             verb = "they expire" if len(rescues) > 1 else "it expires"
             reason = f"Uses {_join([r.lower() for r in rescues])} before {verb}"
@@ -345,3 +348,62 @@ def dish_emoji(name: str, emoji: str) -> str:
     if emoji and not (emoji in _MEAT_EMOJI and not any(w in lower for w in _MEAT_EMOJI[emoji])):
         return emoji
     return next((e for words, e in _DISH_EMOJI if any(w in lower for w in words)), "🍽️")
+
+
+# Every kitchen has these; listing them as "missing" just clutters the shopping list.
+_STAPLES = {
+    "salt", "sugar", "water", "oil", "cooking oil", "turmeric", "haldi", "chilli powder", "chili powder",
+    "red chilli powder", "cumin", "cumin seeds", "jeera", "coriander powder", "garam masala", "cloves",
+    "clove", "clove powder", "cardamom", "cinnamon", "bay leaf", "bay leaves", "paprika", "black pepper",
+    "pepper", "mustard seeds", "fenugreek seeds", "panch phoron", "asafoetida", "hing", "nigella seeds",
+    "kalonji", "spices", "masala",
+}
+
+
+def _staple(name: str) -> bool:
+    return name.strip().lower().rstrip("s") in {s.rstrip("s") for s in _STAPLES}
+
+
+NAME_CHECK_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "dishes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer"},
+                    "name_fits": {
+                        "type": "boolean",
+                        "description": "True only if the name is a real dish and these steps and ingredients make that dish.",
+                    },
+                },
+                "required": ["index", "name_fits"],
+            },
+        }
+    },
+    "required": ["dishes"],
+}
+
+
+def name_check_request(raw: list[dict[str, Any]]) -> tuple[str, str]:
+    """A second, strict look: does each dish's name really describe its recipe?"""
+    system = (
+        "You are a strict food editor. For each numbered dish, decide whether its name is a real dish "
+        "AND whether the listed ingredients and steps actually make that dish. Words in the name count: "
+        "'maach' means fish, 'chingri' prawns, 'murgi'/'kori' chicken, 'dim' egg, 'aloo' potato. If the "
+        "name promises an ingredient that isn't used, or the dish doesn't exist, name_fits is false."
+    )
+    lines = []
+    for i, dish in enumerate(raw):
+        lines.append(
+            f"{i}. {dish.get('name')}\n   uses: {', '.join(map(str, dish.get('uses') or []))}\n   "
+            f"steps: {' '.join(map(str, dish.get('steps') or []))}"
+        )
+    return system, "\n".join(lines)
+
+
+def apply_name_check(raw: list[dict[str, Any]], verdict: dict[str, Any]) -> list[dict[str, Any]]:
+    """Mark dishes the editor rejected, so to_meals shows their plain description instead."""
+    rejected = {d.get("index") for d in verdict.get("dishes") or [] if d.get("name_fits") is False}
+    return [{**dish, "name_matches_recipe": False} if i in rejected else dish for i, dish in enumerate(raw)]

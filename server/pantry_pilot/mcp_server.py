@@ -13,7 +13,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp_types import ToolAnnotations
 from pydantic import BaseModel
 
-from .meal_ideas import suggest_request, suits, to_meals
+from .meal_ideas import NAME_CHECK_SCHEMA, apply_name_check, name_check_request, suggest_request, suits, to_meals
 from .mealtime import current_occasion, local_now
 from .models import Category, Diet, GroceryItem, Household, KitchenTimer, PantryItem
 from .nova import Nova, parse_data_url
@@ -253,6 +253,14 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
         system, text = suggest_request(household.inventory, occasion, count + 3, request, avoid, prefs, zone)
         try:
             raw = await anyio.to_thread.run_sync(nova.suggest_meals, system, text)
+            if raw:
+                # A strict second look at the names: Nova sometimes puts a real dish's name on another recipe.
+                check_system, check_text = name_check_request(raw)
+                try:
+                    verdict = await anyio.to_thread.run_sync(nova.extract, check_system, check_text, "report_names", NAME_CHECK_SCHEMA)
+                    raw = apply_name_check(raw, verdict)
+                except Exception:
+                    log.warning("Dish name check failed; keeping Nova's names", exc_info=True)
             meals = to_meals(raw, household.inventory, count, prefs, exclude=avoid)
         except Exception:
             log.warning("Nova meal ideas failed; using the built-in recipes", exc_info=True)

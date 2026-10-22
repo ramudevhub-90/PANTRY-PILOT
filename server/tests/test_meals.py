@@ -270,3 +270,20 @@ def test_unsure_traditional_name_is_replaced_by_a_plain_description():
             "uses": ["Eggs"], "steps": ["Boil.", "Mash."]}
     names = [m.name for m in to_meals([dish, sure], seed_household().inventory, 2)]
     assert names == ["Bengali spinach and onion rolls", "Aloo Bhorta (mashed potatoes)"]
+
+
+def test_name_check_and_staples():
+    from pantry_pilot.meal_ideas import apply_name_check, name_check_request, to_meals
+    from pantry_pilot.models import seed_household
+
+    raw = [
+        {**POHA, "name": "Spinach Maach", "plain_name": "Garlicky spinach stir-fry", "uses": ["Baby spinach"],
+         "missing": ["sugar", "Cloves", "Mustard oil"], "steps": ["Fry garlic.", "Add spinach."]},
+        {**POHA, "name": "Dimer Jhol", "plain_name": "Egg curry", "uses": ["Eggs"], "steps": ["Boil eggs.", "Simmer in curry."]},
+    ]
+    _, text = name_check_request(raw)
+    assert "0. Spinach Maach" in text and "1. Dimer Jhol" in text
+    checked = apply_name_check(raw, {"dishes": [{"index": 0, "name_fits": False}, {"index": 1, "name_fits": True}]})
+    meals = to_meals(checked, seed_household().inventory, 2)
+    assert [m.name for m in meals] == ["Garlicky spinach stir-fry", "Dimer Jhol"]
+    assert meals[0].missing == ["Mustard oil"]  # sugar and cloves are kitchen staples
