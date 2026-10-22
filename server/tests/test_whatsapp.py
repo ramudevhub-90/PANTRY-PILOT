@@ -177,6 +177,7 @@ def test_judge_pantry_is_refreshed_daily():
     fresh = store.load("judge")
     assert len(fresh.inventory) == len(DEMO_PANTRY)
     assert {i.name: i.days_left for i in fresh.inventory}["Coriander"] == 1
+    assert (fresh.preferences.home_cuisine, fresh.preferences.language) == ("Bengali", "English")
     fresh.inventory = fresh.inventory[:3]
     store.save("judge", fresh)
     assert len(store.load("judge").inventory) == 3  # the judge's own changes last for the day

@@ -47,7 +47,7 @@ from .kroger import CART_URL, Kroger, KrogerError, kroger_from_env
 from .mcp_server import CONFIDENT, create_server
 from .mealtime import TimezoneMiddleware
 from .notify import WHATSAPP_TEMPLATES, Message, _cognito_email, Notifier, NotifyUnavailable, normalise_whatsapp
-from .models import DEMO_GROCERY, GroceryItem, demo_inventory, new_id
+from .models import DEMO_GROCERY, FoodPreferences, GroceryItem, demo_inventory, new_id
 from .nova import BedrockNova, Nova, NovaUnavailable, nova_from_env
 from .store import Store, dumps_for_api, store_from_env
 from .whatsapp import READABLE_MEDIA, Inbound, WhatsApp, WhatsAppTranscript, item_lines, parse_event, verify_signature
@@ -91,9 +91,10 @@ HEARTBEAT_SECONDS = 10
 
 
 class DemoRefreshStore:
-    """Wraps the store so the judges' account starts each day with a fresh pantry: its sample items
-    carry dates relative to today, so they'd otherwise all have expired by judging. Everything
-    else (and every other account) passes straight through."""
+    """Wraps the store so the judges' account starts each day fresh: sample items with dates relative
+    to today (they'd otherwise all have expired by judging) and the film's preferences (Bengali family
+    in Bengaluru, English replies), so one judge's settings don't carry over to the next. Every other
+    account passes straight through."""
 
     def __init__(self, inner: Store, is_demo: Callable[[str], bool]) -> None:
         self._inner, self._is_demo = inner, is_demo
@@ -111,6 +112,7 @@ class DemoRefreshStore:
             household.inventory = demo_inventory()
             household.grocery = [GroceryItem(name=n) for n in DEMO_GROCERY]
             household.meals, household.timers = [], []
+            household.preferences = FoodPreferences(location="Bengaluru, Karnataka, India", home_cuisine="Bengali")
             self._inner.save(household_id, household)
             self._inner.save_record(marker, {"day": today})
         return household
