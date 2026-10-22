@@ -13,6 +13,10 @@ import * as route53Targets from 'aws-cdk-lib/aws-route53-targets';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as ses from 'aws-cdk-lib/aws-ses';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
+import * as sns from 'aws-cdk-lib/aws-sns';
+import * as snsSubscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as lambdaEvents from 'aws-cdk-lib/aws-lambda-event-sources';
 import { Construct } from 'constructs';
 
 export interface PantryPilotStackProps extends cdk.StackProps {
@@ -52,6 +56,8 @@ export const OTP_SENDER_ROLE_NAME = 'pantry-pilot-otp-sender';
 
 // AWS Lambda Web Adapter 1.1.0 (arm64): runs our Starlette app unchanged and streams responses.
 const WEB_ADAPTER_LAYER_VERSION = 30;
+/** SNS topic End User Messaging Social publishes WhatsApp events to (set up in its console). */
+const WHATSAPP_TOPIC_NAME = 'pantry-pilot-whatsapp-events';
 
 export class PantryPilotStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: PantryPilotStackProps) {
@@ -205,6 +211,29 @@ export class PantryPilotStack extends cdk.Stack {
       accessTokenValidity: cdk.Duration.hours(1),
     });
 
+    const serverEnv: Record<string, string> = {
+      AWS_LAMBDA_EXEC_WRAPPER: '/opt/bootstrap',
+      AWS_LWA_INVOKE_MODE: 'response_stream',
+      AWS_LWA_READINESS_CHECK_PATH: '/health',
+      PORT: '8080',
+      PANTRY_TABLE: table.tableName,
+      HOUSEHOLD_ID: 'demo',
+      NOVA_MODE: props.novaMode,
+      NOVA_MODEL: 'global.amazon.nova-2-lite-v1:0',
+      ORIGIN_SECRET: props.originSecret,
+      COGNITO_USER_POOL_ID: users.userPoolId,
+      COGNITO_DOMAIN: loginDomain.baseUrl(),
+      COGNITO_WEB_CLIENT_ID: webClient.userPoolClientId,
+      // Claude signs in on Pantry Pilot's own page (server/pantry_pilot/oauth_app.py).
+      COGNITO_CLAUDE_CLIENT_ID: claudeClient.userPoolClientId,
+      ...(emailCodes ? { COGNITO_EMAIL_OTP: 'on' } : {}),
+      ...(props.novaRoleArn ? { NOVA_ROLE_ARN: props.novaRoleArn } : {}),
+      INSTACART_KEY_PARAM,
+      INSTACART_ENV: props.instacartEnv ?? 'development',
+      KROGER_CREDENTIALS_PARAM,
+      KROGER_ENV: 'production',
+      ...(domainName ? { APP_URL: `https://${domainName}` } : {}),
+    };
     const server = new lambda.Function(this, 'Server', {
       description: 'Pantry Pilot MCP server, Nova agent and web API',
       runtime: lambda.Runtime.PYTHON_3_13,
@@ -224,28 +253,7 @@ export class PantryPilotStack extends cdk.Stack {
         retention: logs.RetentionDays.ONE_MONTH,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
       }),
-      environment: {
-        AWS_LAMBDA_EXEC_WRAPPER: '/opt/bootstrap',
-        AWS_LWA_INVOKE_MODE: 'response_stream',
-        AWS_LWA_READINESS_CHECK_PATH: '/health',
-        PORT: '8080',
-        PANTRY_TABLE: table.tableName,
-        HOUSEHOLD_ID: 'demo',
-        NOVA_MODE: props.novaMode,
-        NOVA_MODEL: 'global.amazon.nova-2-lite-v1:0',
-        ORIGIN_SECRET: props.originSecret,
-        COGNITO_USER_POOL_ID: users.userPoolId,
-        COGNITO_DOMAIN: loginDomain.baseUrl(),
-        COGNITO_WEB_CLIENT_ID: webClient.userPoolClientId,
-        // Claude signs in on Pantry Pilot's own page (server/pantry_pilot/oauth_app.py).
-        COGNITO_CLAUDE_CLIENT_ID: claudeClient.userPoolClientId,
-        ...(emailCodes ? { COGNITO_EMAIL_OTP: 'on' } : {}),
-        ...(props.novaRoleArn ? { NOVA_ROLE_ARN: props.novaRoleArn } : {}),
-        INSTACART_KEY_PARAM,
-        INSTACART_ENV: props.instacartEnv ?? 'development',
-        KROGER_CREDENTIALS_PARAM,
-        KROGER_ENV: 'production',
-      },
+      environment: serverEnv,
     });
     // Instacart and Kroger credentials (SSM SecureStrings, encrypted with the AWS-managed aws/ssm key).
     server.addToRolePolicy(
@@ -297,6 +305,58 @@ export class PantryPilotStack extends cdk.Stack {
           resources: [`arn:aws:social-messaging:${this.region}:${this.account}:phone-number-id/*`],
         }),
       );
+
+      // WhatsApp chat: messages people send to the number arrive on the SNS topic linked in
+      // End User Messaging Social. A queue feeds them to an inbox copy of the server (same code and
+      // role, no URL), whose Lambda Web Adapter posts each batch to /events.
+      const media = new s3.Bucket(this, 'WhatsAppMedia', {
+        blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+        enforceSSL: true,
+        lifecycleRules: [{ expiration: cdk.Duration.days(1) }],
+        removalPolicy: cdk.RemovalPolicy.DESTROY,
+      });
+      media.grantReadWrite(server);
+      media.grantDelete(server);
+      server.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['social-messaging:GetWhatsAppMessageMedia'],
+          resources: [`arn:aws:social-messaging:${this.region}:${this.account}:phone-number-id/*`],
+        }),
+      );
+      const inboxTimeout = cdk.Duration.seconds(180);
+      const inboxQueue = new sqs.Queue(this, 'WhatsAppInbox', {
+        visibilityTimeout: cdk.Duration.seconds(900),
+        retentionPeriod: cdk.Duration.days(1),
+        enforceSSL: true,
+      });
+      sns.Topic.fromTopicArn(this, 'WhatsAppEvents', `arn:aws:sns:${this.region}:${this.account}:${WHATSAPP_TOPIC_NAME}`).addSubscription(
+        new snsSubscriptions.SqsSubscription(inboxQueue),
+      );
+      const { AWS_LWA_INVOKE_MODE: _stream, ORIGIN_SECRET: _secret, ...inboxEnv } = serverEnv;
+      const inbox = new lambda.Function(this, 'WhatsAppInboxFunction', {
+        description: 'Pantry Pilot WhatsApp chat: answers messages and reads photos sent to the number',
+        runtime: lambda.Runtime.PYTHON_3_13,
+        architecture: lambda.Architecture.ARM_64,
+        handler: 'run.sh',
+        code: lambda.Code.fromAsset(path.join(__dirname, '..', 'build', 'lambda')),
+        layers: [this.node.findChild('WebAdapter') as lambda.ILayerVersion],
+        role: server.role,
+        memorySize: 1024,
+        timeout: inboxTimeout,
+        logGroup: new logs.LogGroup(this, 'WhatsAppInboxLogs', {
+          retention: logs.RetentionDays.ONE_MONTH,
+          removalPolicy: cdk.RemovalPolicy.DESTROY,
+        }),
+        environment: {
+          ...inboxEnv,
+          ...(notify ? { NOTIFY_FUNCTION: notify.functionName } : {}),
+          WHATSAPP_PHONE_ID: props.whatsappPhoneId,
+          WHATSAPP_INBOX: 'on',
+          WHATSAPP_MEDIA_BUCKET: media.bucketName,
+          AWS_LWA_PASS_THROUGH_PATH: '/events',
+        },
+      });
+      inbox.addEventSource(new lambdaEvents.SqsEventSource(inboxQueue, { batchSize: 1 }));
     }
     // Spoken replies: Amazon Polly reads the assistant's answers aloud (phones play this reliably).
     server.addToRolePolicy(new iam.PolicyStatement({ actions: ['polly:SynthesizeSpeech'], resources: ['*'] }));

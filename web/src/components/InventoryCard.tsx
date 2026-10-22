@@ -50,6 +50,15 @@ export function InventoryCard() {
   const { addGrocery } = useKitchenActions();
   const [filter, setFilter] = useState<Filter>('all');
   const [adding, setAdding] = useState(false);
+  // WhatsApp's "Open the camera" button links to /?scan=1. Browsers only open the camera on a tap,
+  // so we show a big "Take a photo" button instead of opening it automatically.
+  const [fromWhatsApp, setFromWhatsApp] = useState(() => new URLSearchParams(window.location.search).get('scan') === '1');
+  const closeScanPrompt = () => {
+    setFromWhatsApp(false);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('scan');
+    window.history.replaceState(null, '', url);
+  };
   const [query, setQuery] = useState('');
   const q = query.trim().toLowerCase();
   const items = state.inventory
@@ -73,6 +82,17 @@ export function InventoryCard() {
           <ScanButton disabled={state.mode === 'thinking'} />
         </div>
       </header>
+
+      {fromWhatsApp && (
+        <div className="scan-prompt" ref={(el) => el?.scrollIntoView({ block: 'center' })}>
+          <Camera size={22} aria-hidden="true" />
+          <div>
+            <strong>Scan your groceries</strong>
+            <span>Take a photo of what you bought, your fridge or the bill. Nova adds the items to your pantry.</span>
+          </div>
+          <ScanButton variant="hero" camera disabled={state.mode === 'thinking'} onPicked={closeScanPrompt} />
+        </div>
+      )}
 
       {adding && <AddItemForm onDone={() => setAdding(false)} />}
 

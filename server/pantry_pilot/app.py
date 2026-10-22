@@ -48,6 +48,7 @@ from .notify import WHATSAPP_TEMPLATES, Message, _cognito_email, Notifier, Notif
 from .models import GroceryItem, new_id
 from .nova import BedrockNova, Nova, NovaUnavailable, nova_from_env
 from .store import Store, dumps_for_api, store_from_env
+from .whatsapp import READABLE_MEDIA, Inbound, WhatsApp, item_lines, parse_event
 
 
 def _env_list(name: str) -> list[str]:
@@ -69,6 +70,11 @@ class OriginSecretMiddleware:
                 return
         await self.app(scope, receive, send)
 
+
+APP_URL = os.environ.get("APP_URL", "https://trypantrypilot.com")
+WHATSAPP_HELLO = {"hi", "hello", "hey", "hii", "menu", "help", "start", "namaste", "hi pantry pilot"}
+WHATSAPP_SCAN_WORDS = {"scan", "camera", "photo", "scan groceries", "scan my groceries", "scan bill", "scan my bill"}
+WHATSAPP_BUTTON_TEXT = {"meal": "What should I cook now?", "list": "What's on my grocery list?"}
 
 DEMO_EMAIL = "ramu.devhub@gmail.com"
 DEMO_UNTIL = 1798761599  # 2026-12-31T23:59:59Z, same as infra/lambda/auth/verify-challenge.mjs
@@ -271,6 +277,11 @@ def create_app(
 
     @mcp.custom_route("/api/state", methods=["GET"])
     async def get_state(_: Request) -> Response:
+        hid = household_id_now()
+        number = store.load(hid).notifications.whatsapp
+        # Numbers saved before WhatsApp chat existed get linked the next time the app opens.
+        if number and not store.load_record(f"whatsapp#{number}"):
+            store.save_record(f"whatsapp#{number}", {"household": hid})
         return state_response()
 
     @mcp.custom_route("/api/voice/stream", methods=["GET"])
@@ -465,8 +476,13 @@ def create_app(
             except NotifyUnavailable as err:
                 return JSONResponse({"error": str(err)}, status_code=503)
         household = store.load(hid)
+        if household.notifications.whatsapp and household.notifications.whatsapp != number:
+            store.delete_record(f"whatsapp#{household.notifications.whatsapp}")
         household.notifications.whatsapp = number
         store.save(hid, household)
+        if number:
+            # Messages from this number to Pantry Pilot's WhatsApp act on this household.
+            store.save_record(f"whatsapp#{number}", {"household": hid})
         return state_response()
 
     @mcp.custom_route("/api/preferences", methods=["POST"])
@@ -910,6 +926,129 @@ def create_app(
         household.timers = [t for t in household.timers if t.id != timer_id]
         store.save(hid, household)
         return state_response()
+
+    if os.environ.get("WHATSAPP_INBOX") == "on":
+        whatsapp = WhatsApp()
+
+        @mcp.custom_route("/events", methods=["POST"])
+        async def whatsapp_events(request: Request) -> Response:
+            """SQS batches of WhatsApp messages, posted here by the Lambda Web Adapter (inbox Lambda only,
+            which has no URL). A failed message is logged and dropped rather than retried, so nobody
+            gets the same reply twice."""
+            for message in parse_event(await request.json()):
+                try:
+                    await whatsapp_message(message)
+                except Exception:
+                    log.exception("WhatsApp message %s failed", message.id)
+                    with contextlib.suppress(Exception):
+                        await anyio.to_thread.run_sync(
+                            whatsapp.text, message.sender, "Sorry, something went wrong on my side. Please try again in a minute."
+                        )
+            return JSONResponse({"batchItemFailures": []})
+
+        async def whatsapp_message(m: Inbound) -> None:
+            seen = f"whatsapp-seen#{m.id}"
+            if not m.id or await anyio.to_thread.run_sync(store.load_record, seen):
+                return  # SQS delivers at least once
+            await anyio.to_thread.run_sync(store.save_record, seen, {"at": time.time()})
+            await anyio.to_thread.run_sync(whatsapp.mark_read, m.id)
+            link = await anyio.to_thread.run_sync(store.load_record, f"whatsapp#{m.sender}")
+            if not link:
+                await anyio.to_thread.run_sync(
+                    whatsapp.link,
+                    m.sender,
+                    "Hi! This number isn't linked to Pantry Pilot yet. Open the app, go to Shopping apps, "
+                    "and add it under WhatsApp updates. Then message me here any time.",
+                    "Open Pantry Pilot",
+                    APP_URL,
+                )
+                return
+            user = current_user.set(link["household"])
+            try:
+                await whatsapp_reply(m)
+            finally:
+                current_user.reset(user)
+
+        async def whatsapp_reply(m: Inbound) -> None:
+            to = m.sender
+            send = lambda fn, *args: anyio.to_thread.run_sync(fn, to, *args)  # noqa: E731
+            scan_key = f"{household_id_now()}#whatsapp-scan"
+            words = m.text.lower().strip(" !.?")
+
+            if m.kind in ("image", "document"):
+                if m.mime not in READABLE_MEDIA:
+                    await send(whatsapp.text, "I can read photos (JPEG or PNG) and PDF bills. Please send one of those.")
+                    return
+                await send(whatsapp.text, "Got it, reading your " + ("bill" if m.kind == "document" else "photo") + " with Amazon Nova…")
+                data = await anyio.to_thread.run_sync(whatsapp.download, m.media_id)
+                url = f"data:{m.mime};base64,{base64.b64encode(data).decode()}"
+                kind = "receipt" if m.kind == "document" or any(w in words for w in ("bill", "receipt", "invoice")) else "auto"
+                args = {"document": url} if m.kind == "document" else {"images": [url]}
+                async with Client(mcp) as client:
+                    result = await client.call_tool("scan_pantry", {**args, "kind": kind})
+                items = (result.structured_content or {}).get("items", []) if not result.is_error else []
+                if not items:
+                    await send(whatsapp.text, "I couldn't spot any groceries in that. Try a closer, brighter photo, or a clear photo of the bill.")
+                    return
+                await anyio.to_thread.run_sync(store.save_record, scan_key, {"items": items, "at": time.time()})
+                await send(
+                    whatsapp.buttons,
+                    f"I found {len(items)} item{'s' if len(items) != 1 else ''}:\n\n{item_lines(items)}\n\nAdd them to your pantry?",
+                    [("scan_add", "Add to pantry"), ("scan_cancel", "Cancel")],
+                )
+                return
+
+            if m.kind == "button" and m.button in ("scan_add", "scan_cancel"):
+                pending = await anyio.to_thread.run_sync(store.load_record, scan_key)
+                await anyio.to_thread.run_sync(store.delete_record, scan_key)
+                if m.button == "scan_cancel" or not pending:
+                    await send(whatsapp.text, "Okay, nothing added." if pending or m.button == "scan_cancel" else "That scan has expired. Send the photo again.")
+                    return
+                async with Client(mcp) as client:
+                    async for _ in _turn_events({"confirmItems": pending["items"]}, client):
+                        pass
+                count = len(pending["items"])
+                await send(
+                    whatsapp.buttons,
+                    f"Done, I added {count} item{'s' if count != 1 else ''} to your pantry. Want a meal idea that uses them?",
+                    [("meal", "Meal idea"), ("list", "Grocery list")],
+                )
+                return
+
+            if (m.kind == "button" and m.button == "scan") or words in WHATSAPP_SCAN_WORDS:
+                await send(
+                    whatsapp.link,
+                    "Send me a photo of your groceries, your fridge or the bill right here, and I'll add the items "
+                    "to your pantry. Or open the camera in Pantry Pilot:",
+                    "Open the camera",
+                    f"{APP_URL}/?scan=1",
+                )
+                return
+
+            if m.kind == "text" and words in WHATSAPP_HELLO:
+                await send(
+                    whatsapp.buttons,
+                    "Hi, I'm Pantry Pilot 👋 Ask me anything about your kitchen: what to cook, what's running out, "
+                    "your grocery list, or prices on Zepto and Swiggy. Send a photo of your groceries or a bill "
+                    "and I'll add them to your pantry.",
+                    [("meal", "What to cook"), ("list", "Grocery list"), ("scan", "Scan groceries")],
+                )
+                return
+
+            text = WHATSAPP_BUTTON_TEXT.get(m.button, "") if m.kind == "button" else m.text
+            if not text:
+                await send(whatsapp.text, "I can read text, photos and PDF bills. Try “what should I cook?” or send a photo of your groceries.")
+                return
+            replies: list[str] = []
+            turn = ordering.current_turn.set({"id": new_id(), "text": text})
+            try:
+                async with Client(mcp) as client:
+                    async for event in _turn_events({"text": text}, client):
+                        if event["type"] == "reply" and event.get("text"):
+                            replies.append(event["text"])
+            finally:
+                ordering.current_turn.reset(turn)
+            await send(whatsapp.text, "\n\n".join(replies) or "Sorry, I didn't get an answer for that. Please try again.")
 
     @mcp.custom_route("/health", methods=["GET"])
     async def health(_: Request) -> Response:

@@ -27,6 +27,9 @@ function callbackParams(text: string): { code: string; state: string } | null {
 }
 
 const looksLikeCallback = (text: string) => callbackParams(text) !== null;
+/** Pantry Pilot's WhatsApp number; messages there reach the same assistant (server/pantry_pilot/whatsapp.py). */
+const WHATSAPP_CHAT_URL = 'https://wa.me/17110578144?text=Hi';
+
 /** Only the last 4 digits are shown, so the number stays private on screen and in demo videos. */
 const maskNumber = (n: string) => `${n.slice(0, 3)} ••••• ${n.slice(-4)}`;
 
@@ -357,6 +360,19 @@ export function ConnectorsCard() {
           </form>
         )}
       </div>
+
+      {state.notifications.whatsapp && (
+        <div className="apps__whatsapp-chat">
+          <div>
+            <strong>Chat with Pantry Pilot on WhatsApp</strong>
+            <span>Ask what to cook, check your list, or send a photo of your groceries or bill to add them to your pantry.</span>
+          </div>
+          <a className="btn btn--sm" href={WHATSAPP_CHAT_URL} target="_blank" rel="noreferrer">
+            <MessageCircle size={15} aria-hidden="true" />
+            Open WhatsApp
+          </a>
+        </div>
+      )}
 
       <p className="apps__notify muted small-print">
         <Mail size={13} aria-hidden="true" />

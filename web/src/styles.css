@@ -2793,3 +2793,67 @@ p {
   background: var(--soon-soft);
   color: var(--soon);
 }
+
+/* WhatsApp chat entry under the WhatsApp number */
+.apps__whatsapp-chat {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, #25d366 10%, transparent);
+  border: 1px solid color-mix(in srgb, #25d366 35%, transparent);
+}
+.apps__whatsapp-chat > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+}
+.apps__whatsapp-chat span {
+  color: var(--text-2);
+}
+.apps__whatsapp-chat .btn {
+  flex-shrink: 0;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Shown when the app is opened from WhatsApp's "Open the camera" button (/?scan=1) */
+.scan-prompt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 14px;
+  border-radius: 14px;
+  background: color-mix(in srgb, #25d366 12%, transparent);
+  border: 1px solid color-mix(in srgb, #25d366 40%, transparent);
+}
+.scan-prompt > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.88rem;
+}
+.scan-prompt .btn {
+  flex-shrink: 0;
+}
+@media (max-width: 520px) {
+  .scan-prompt,
+  .apps__whatsapp-chat {
+    flex-wrap: wrap;
+  }
+  .scan-prompt .btn,
+  .apps__whatsapp-chat .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
