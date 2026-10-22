@@ -273,6 +273,10 @@ export function AuthScreen() {
           )}
         </div>
       </form>
+      <footer className="site-footer">
+        <strong>Pantry Pilot</strong> · a kitchen agent for Alexa+, the web and WhatsApp ·{' '}
+        <a href="/privacy.html">Privacy policy</a> · <a href="mailto:ramu.devhub@gmail.com">ramu.devhub@gmail.com</a>
+      </footer>
     </div>
   );
 }

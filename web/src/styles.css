@@ -3084,3 +3084,18 @@ p {
     justify-content: center;
   }
 }
+
+/* Business details on the sign-in page (brand, privacy policy, contact) */
+.site-footer {
+  margin-top: 20px;
+  max-width: 420px;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-2);
+}
+.site-footer a {
+  color: inherit;
+}
+.auth-page:has(.site-footer) {
+  align-content: center;
+}
