@@ -187,6 +187,18 @@ def test_price_questions_get_a_fresh_comparison():
     assert not wants_price_comparison("How much milk do we have?")
 
 
+def test_stock_questions_must_use_a_tool():
+    from pantry_pilot.agent import wants_kitchen_facts
+
+    assert wants_kitchen_facts("Check if I can prepare coffee.")
+    assert wants_kitchen_facts("I don't have them. Is it there in your grocery?")
+    assert wants_kitchen_facts("Do we have sugar?")
+    assert wants_kitchen_facts("Is coffee on my grocery list?")
+    assert wants_kitchen_facts("I asked about coffee powder and sugar.")
+    assert not wants_kitchen_facts("Thanks, that's all")
+    assert not wants_kitchen_facts("Set a 10 minute timer for the pasta")
+
+
 def test_same_language_as_i_speak():
     from pantry_pilot.agent import requested_language
 

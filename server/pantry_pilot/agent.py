@@ -19,6 +19,10 @@ It is {now} for the user (their local time), so the next meal is {occasion}.
 
 How to work:
 - Use the tools for every fact about the kitchen. Never guess what's in stock.
+- "Do I have X?", "is X on my list?", "can I make X?": call get_inventory (and get_grocery_list for
+  the list) and answer only from that result. Name only items that appear in it; if what they asked
+  about isn't there, say plainly that it isn't in the pantry (or on the list) and offer to add it
+  to the grocery list. Never mention an item the user didn't ask about as if they had.
 - "What can I make?" without naming a meal: first confirm the meal in one short question using
   the local time, e.g. "It's 5:30 pm, so evening snacks? Or are you planning dinner?", and call no
   tool yet. When they answer (or if they named the meal to begin with), call plan_meals with that
@@ -105,6 +109,19 @@ def wants_price_comparison(text: str) -> bool:
     return bool(_PRICES.search(text))
 
 
+_KITCHEN_FACTS = re.compile(
+    r"\b(do (i|we|you) have|have (i|we) got|got any|any left|in (my|the|our) (pantry|fridge|kitchen|list|grocer\w*)"
+    r"|on (my|the|our) (grocery |shopping )?list|in stock|can (i|we|you|he|she) (make|prepare|cook)"
+    r"|(i|we|you|he|she) can (make|prepare|cook)|is (it|there)|asked (about|for))\b",
+    re.I,
+)
+
+
+def wants_kitchen_facts(text: str) -> bool:
+    """"Do we have sugar?", "is it on my list?", "can I make coffee?": answer from a tool, never memory."""
+    return bool(_KITCHEN_FACTS.search(text))
+
+
 def plain(text: str) -> str:
     """Replies are spoken and shown as plain text, but Nova sometimes adds markdown anyway."""
     text = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: m.group(1) or m.group(2), text)
@@ -185,9 +202,11 @@ async def run_agent(
         else "compare_grocery_prices" if wants_price_comparison(text) and "compare_grocery_prices" in names
         else None
     )
+    # Stock questions must start from a tool call: answering from chat history invented items.
+    must_look = forced is None and wants_kitchen_facts(text)
 
     for step in range(max_steps):
-        choice = {"tool": {"name": forced}} if forced and step == 0 else None
+        choice = {"tool": {"name": forced}} if forced and step == 0 else {"any": {}} if must_look and step == 0 else None
         response = await anyio.to_thread.run_sync(
             lambda: nova.converse(system=system, messages=messages, tools=tools, tool_choice=choice)
         )
