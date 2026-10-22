@@ -19,7 +19,7 @@ The pantry stays accurate without typing:
 - **Snap your groceries, a bill, a PDF invoice or an order screenshot**, or record a 10-second **video** of your fridge. Amazon Nova reads the items, pack sizes and quantities, skips non-food lines, fees and freebies, and estimates shelf life. A review screen highlights anything it's unsure of, so you fix quantities before saving.
 - **Sync your Swiggy Instamart and Zepto orders.** Pantry Pilot reads your delivered orders through the apps' own MCP servers, skips cancelled orders and non-food items (yes, a razor and a nebulizer showed up in our grocery history), and lists the new groceries to confirm.
 
-**WhatsApp, for when you're not near Alexa:**
+**WhatsApp, for when you're not near Alexa** (try it in the app under Shopping apps → *Try it here*; our WhatsApp Business number is waiting for Meta to approve its display name, so for now the in-app chat runs the same replies):
 
 - **Chat with Pantry Pilot on WhatsApp.** The same agent and conversation as Alexa: "what's expiring?", "what should I cook tonight?", "compare prices for my list".
 - **Send a photo of your shopping or the bill.** Nova reads it, lists the items, and an "Add to pantry" button saves them.
