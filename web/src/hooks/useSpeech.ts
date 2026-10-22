@@ -128,10 +128,25 @@ if (typeof window !== 'undefined') {
   window.addEventListener('keydown', unlock, { once: true, capture: true });
 }
 
+// The fallback voice should sound like Polly's Kajal (Indian English, female) and never change
+// between replies: taking "the first en-US voice" picked a male voice on some Macs.
+const FALLBACK_VOICES = [
+  'Veena',
+  'Microsoft Neerja Online (Natural) - English (India)',
+  'Microsoft Heera - English (India)',
+  'Google UK English Female',
+  'Samantha',
+  'Google US English',
+  'Microsoft Aria Online (Natural) - English (United States)',
+];
+
 function pickVoice(): SpeechSynthesisVoice | undefined {
   const voices = window.speechSynthesis.getVoices();
-  const preferred = ['Samantha', 'Google US English', 'Microsoft Aria Online (Natural) - English (United States)'];
-  return voices.find((v) => preferred.includes(v.name)) ?? voices.find((v) => v.lang === 'en-US');
+  for (const name of FALLBACK_VOICES) {
+    const voice = voices.find((v) => v.name === name);
+    if (voice) return voice;
+  }
+  return voices.find((v) => /female/i.test(v.name) && v.lang.startsWith('en')) ?? voices.find((v) => v.lang.startsWith('en'));
 }
 
 /** A voice for this language (e.g. bn-IN), or any voice for the base language (bn). */
@@ -168,7 +183,8 @@ export function speak(text: string, onEnd: () => void) {
   // every turn). Polly's Kajal speaks English and Hindi; for Bengali, Tamil and the rest the phone's
   // own voice reads the text when it has one for that language.
   const code = scriptLanguage(text);
-  const pollyLang = code === 'hi-IN' ? 'hi-IN' : speechLanguage() === 'auto' ? 'en-IN' : speechLanguage();
+  // Always Kajal (en-IN / hi-IN), whatever the microphone's language, so every reply has one voice.
+  const pollyLang = code === 'hi-IN' ? 'hi-IN' : 'en-IN';
   if (player && POLLY_CODES.has(code)) speakWithPolly(text, finish, pollyLang);
   else speakWithBrowser(text, finish, code === 'en-IN' ? undefined : code);
 }
