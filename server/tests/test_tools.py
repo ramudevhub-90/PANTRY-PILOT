@@ -125,15 +125,24 @@ def test_grocery_from_a_meal_adds_only_its_missing_items_and_items_can_be_remove
     assert result["removed"] == ["Milk"] and "Milk" not in call(store, "get_grocery_list")["items"]
 
 
-def test_voice_adds_get_real_shelf_lives(store):
-    call(store, "update_inventory", {"action": "add", "items": [
-        {"name": "Chicken", "quantity": 1, "unit": "kg"},
-        {"name": "Tomatoes", "quantity": 500, "unit": "g"},
-        {"name": "Eggplant", "quantity": 2, "unit": "pcs"},
-        {"name": "Chickpeas", "quantity": 1, "unit": "kg"},
-    ]})
+
+def test_adds_without_expiry_use_novas_shelf_life(store):
+    class ShelfNova(MockNova):
+        def extract(self, system, text, name, schema):
+            assert name == "report_shelf_life"
+            return {"items": [{"name": "Chicken", "category": "protein", "expires_in_days": 2},
+                              {"name": "Chickpeas", "category": "pantry", "expires_in_days": 300}]}
+
+    async def run():
+        async with Client(create_server(store, ShelfNova(), lambda: "test")) as client:
+            await client.call_tool("update_inventory", {"action": "add", "items": [
+                {"name": "Chicken", "quantity": 1, "unit": "kg"},
+                {"name": "Chickpeas", "quantity": 1, "unit": "kg"},
+                {"name": "Saffron", "quantity": 1, "unit": "g"},
+            ]})
+
+    anyio.run(run)
     items = {i.name: (i.category, i.days_left) for i in store.load("test").inventory}
     assert items["Chicken"] == ("protein", 2)
-    assert items["Tomatoes"] == ("produce", 5)
-    assert items["Eggplant"] == ("produce", 5)  # not eggs
-    assert items["Chickpeas"] == ("pantry", 180)  # dried, not peas
+    assert items["Chickpeas"] == ("pantry", 300)
+    assert items["Saffron"] == ("pantry", 180)  # Nova didn't mention it: category default

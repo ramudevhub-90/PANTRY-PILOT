@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import time
 from collections.abc import Callable
 from datetime import date, timedelta
@@ -40,33 +39,31 @@ _DEFAULT_SHELF_LIFE: dict[str, int] = {
     "produce": 5, "dairy": 7, "protein": 3, "grains": 180, "pantry": 180, "condiments": 365,
 }
 
-# Items added without a category (often by voice: "we bought chicken and tomatoes") used to land
-# in "pantry" with a 6-month shelf life. Common foods get their real category and shelf life.
-_KNOWN_SHELF_LIFE: list[tuple[tuple[str, ...], Category, int]] = [
-    (("chicken", "mutton", "fish", "prawn", "shrimp", "rohu", "hilsa", "meat", "keema", "salmon"), "protein", 2),
-    (("tofu",), "protein", 5),
-    (("egg",), "protein", 14),
-    (("milk",), "dairy", 3),
-    (("paneer", "curd", "yogurt", "yoghurt", "dahi", "cream"), "dairy", 5),
-    (("butter", "ghee"), "dairy", 30),
-    (("cheese", "cheddar"), "dairy", 21),
-    (("bread", "pav", "bun"), "grains", 4),
-    (("coriander", "cilantro", "mint", "spinach", "palak", "methi", "lettuce", "greens", "basil", "curry leaves"), "produce", 3),
-    (("tomato", "cucumber", "capsicum", "bell pepper", "brinjal", "eggplant", "okra", "bhindi", "beans",
-      "broccoli", "cauliflower", "cabbage", "mushroom", "banana", "grape", "berry", "berries", "mango", "papaya",
-      "chilli", "chili", "lemon", "lime", "carrot", "gourd", "peas", "corn"), "produce", 5),
-    (("apple", "orange"), "produce", 14),
-    (("ginger", "garlic", "onion", "potato", "sweet potato", "pumpkin", "yam"), "produce", 25),
-]
-
-
-def _guess_shelf_life(name: str) -> tuple[Category, int] | None:
-    """Whole words only (plurals allowed), so "eggplant" isn't eggs and "chickpeas" aren't peas."""
-    words = name.lower()
-    for keys, category, days in _KNOWN_SHELF_LIFE:
-        if any(re.search(rf"\b{re.escape(k)}(e?s)?\b", words) for k in keys):
-            return category, days
-    return None
+# Items added without an expiry (often by voice: "we bought chicken and tomatoes") used to get the
+# category default, e.g. 180 days in "pantry". Nova estimates the real category and shelf life.
+_SHELF_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The item name exactly as given."},
+                    "category": {"type": "string", "enum": list(_DEFAULT_SHELF_LIFE)},
+                    "expires_in_days": {"type": "integer", "description": "Typical shelf life from today when stored properly at home."},
+                },
+                "required": ["name", "category", "expires_in_days"],
+            },
+        }
+    },
+    "required": ["items"],
+}
+_SHELF_PROMPT = (
+    "For each grocery item (one per line), give its category and how many days it typically stays good "
+    "from today when stored properly at home (fresh meat and fish about 2, leafy greens about 3, dried "
+    "grains and lentils months). Report every item, with its name exactly as given."
+)
 
 
 # Units that convert into each other: unit -> (base unit, factor).
@@ -141,6 +138,22 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
     def load() -> Household:
         return store.load(household_id())
 
+    def estimate_shelf_lives(names: list[str]) -> dict[str, tuple[Category, int]]:
+        """Nova's category and shelf life per lower-cased name; {} if Nova can't answer."""
+        if not names:
+            return {}
+        try:
+            read = nova.extract(_SHELF_PROMPT, "\n".join(names), "report_shelf_life", _SHELF_SCHEMA)
+        except Exception:  # noqa: BLE001 - fall back to the category defaults
+            log.info("Shelf-life estimate unavailable", exc_info=True)
+            return {}
+        found: dict[str, tuple[Category, int]] = {}
+        for item in read.get("items") or []:
+            name, category, days = str(item.get("name", "")).strip().lower(), item.get("category"), item.get("expires_in_days")
+            if name and category in _DEFAULT_SHELF_LIFE and isinstance(days, (int, float)) and 0 <= days <= 1000:
+                found[name] = (category, int(days))
+        return found
+
     def save(household: Household) -> None:
         store.save(household_id(), household)
 
@@ -178,6 +191,7 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
         not_found: list[str] = []
         today = date.today()
 
+        estimates = estimate_shelf_lives([c.name for c in items if c.expires_in_days is None]) if action == "add" else {}
         for change in items:
             existing = _match(household, change.name, loose=action != "add")
 
@@ -185,7 +199,7 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
                 if change.quantity is None or not change.unit:
                     not_found.append(change.name)
                     continue
-                guess = _guess_shelf_life(change.name)
+                guess = estimates.get(change.name.strip().lower())
                 category = change.category or (existing.category if existing else guess[0] if guess else "pantry")
                 if change.expires_in_days is not None:
                     days = change.expires_in_days
