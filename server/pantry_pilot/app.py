@@ -48,7 +48,7 @@ from .notify import WHATSAPP_TEMPLATES, Message, _cognito_email, Notifier, Notif
 from .models import GroceryItem, new_id
 from .nova import BedrockNova, Nova, NovaUnavailable, nova_from_env
 from .store import Store, dumps_for_api, store_from_env
-from .whatsapp import READABLE_MEDIA, Inbound, WhatsApp, item_lines, parse_event
+from .whatsapp import READABLE_MEDIA, Inbound, WhatsApp, WhatsAppTranscript, item_lines, parse_event
 
 
 def _env_list(name: str) -> list[str]:
@@ -927,6 +927,116 @@ def create_app(
         store.save(hid, household)
         return state_response()
 
+    async def whatsapp_reply(m: Inbound, wa: Any) -> None:
+        """Answer one WhatsApp message. `wa` sends the replies: the real WhatsApp number, or the
+        in-app preview's transcript (same code, so the preview shows exactly what WhatsApp would)."""
+        to = m.sender
+        send = lambda fn, *args: anyio.to_thread.run_sync(fn, to, *args)  # noqa: E731
+        scan_key = f"{household_id_now()}#whatsapp-scan"
+        words = m.text.lower().strip(" !.?")
+
+        if m.kind in ("image", "document"):
+            if m.mime not in READABLE_MEDIA:
+                await send(wa.text, "I can read photos (JPEG or PNG) and PDF bills. Please send one of those.")
+                return
+            await send(wa.text, "Got it, reading your " + ("bill" if m.kind == "document" else "photo") + " with Amazon Nova…")
+            data = await anyio.to_thread.run_sync(wa.download, m.media_id)
+            url = f"data:{m.mime};base64,{base64.b64encode(data).decode()}"
+            kind = "receipt" if m.kind == "document" or any(w in words for w in ("bill", "receipt", "invoice")) else "auto"
+            args = {"document": url} if m.kind == "document" else {"images": [url]}
+            async with Client(mcp) as client:
+                result = await client.call_tool("scan_pantry", {**args, "kind": kind})
+            items = (result.structured_content or {}).get("items", []) if not result.is_error else []
+            if not items:
+                await send(wa.text, "I couldn't spot any groceries in that. Try a closer, brighter photo, or a clear photo of the bill.")
+                return
+            await anyio.to_thread.run_sync(store.save_record, scan_key, {"items": items, "at": time.time()})
+            await send(
+                wa.buttons,
+                f"I found {len(items)} item{'s' if len(items) != 1 else ''}:\n\n{item_lines(items)}\n\nAdd them to your pantry?",
+                [("scan_add", "Add to pantry"), ("scan_cancel", "Cancel")],
+            )
+            return
+
+        if m.kind == "button" and m.button in ("scan_add", "scan_cancel"):
+            pending = await anyio.to_thread.run_sync(store.load_record, scan_key)
+            await anyio.to_thread.run_sync(store.delete_record, scan_key)
+            if m.button == "scan_cancel" or not pending:
+                await send(wa.text, "Okay, nothing added." if pending or m.button == "scan_cancel" else "That scan has expired. Send the photo again.")
+                return
+            async with Client(mcp) as client:
+                async for _ in _turn_events({"confirmItems": pending["items"]}, client):
+                    pass
+            count = len(pending["items"])
+            await send(
+                wa.buttons,
+                f"Done, I added {count} item{'s' if count != 1 else ''} to your pantry. Want a meal idea that uses them?",
+                [("meal", "Meal idea"), ("list", "Grocery list")],
+            )
+            return
+
+        if (m.kind == "button" and m.button == "scan") or words in WHATSAPP_SCAN_WORDS:
+            await send(
+                wa.link,
+                "Send me a photo of your groceries, your fridge or the bill right here, and I'll add the items "
+                "to your pantry. Or open the camera in Pantry Pilot:",
+                "Open the camera",
+                f"{APP_URL}/?scan=1",
+            )
+            return
+
+        if m.kind == "text" and words in WHATSAPP_HELLO:
+            await send(
+                wa.buttons,
+                "Hi, I'm Pantry Pilot 👋 Ask me anything about your kitchen: what to cook, what's running out, "
+                "your grocery list, or prices on Zepto and Swiggy. Send a photo of your groceries or a bill "
+                "and I'll add them to your pantry.",
+                [("meal", "What to cook"), ("list", "Grocery list"), ("scan", "Scan groceries")],
+            )
+            return
+
+        text = WHATSAPP_BUTTON_TEXT.get(m.button, "") if m.kind == "button" else m.text
+        if not text:
+            await send(wa.text, "I can read text, photos and PDF bills. Try “what should I cook?” or send a photo of your groceries.")
+            return
+        replies: list[str] = []
+        turn = ordering.current_turn.set({"id": new_id(), "text": text})
+        try:
+            async with Client(mcp) as client:
+                async for event in _turn_events({"text": text}, client):
+                    if event["type"] == "reply" and event.get("text"):
+                        replies.append(event["text"])
+        finally:
+            ordering.current_turn.reset(turn)
+        await send(wa.text, "\n\n".join(replies) or "Sorry, I didn't get an answer for that. Please try again.")
+
+    @mcp.custom_route("/api/whatsapp/preview", methods=["POST"])
+    async def whatsapp_preview(request: Request) -> Response:
+        """The WhatsApp chat inside the app: {text} | {button} | {image: data URL}. Runs the same
+        replies as the real number and returns them instead of sending them."""
+        body = await request.json()
+        transcript = WhatsAppTranscript()
+        base = {"id": new_id(), "sender": "app"}
+        if image := str(body.get("image") or ""):
+            mime, _, data = image.partition(";base64,")
+            mime = mime.removeprefix("data:")
+            try:
+                transcript.media = base64.b64decode(data)
+            except ValueError:
+                return JSONResponse({"error": "That file couldn't be read."}, status_code=400)
+            kind = "document" if mime == "application/pdf" else "image"
+            m = Inbound(**base, kind=kind, mime=mime, media_id="app", text=str(body.get("text") or ""))
+        elif button := str(body.get("button") or ""):
+            m = Inbound(**base, kind="button", button=button)
+        else:
+            m = Inbound(**base, kind="text", text=str(body.get("text") or "").strip())
+        try:
+            await whatsapp_reply(m, transcript)
+        except NovaUnavailable as err:
+            transcript.text("app", str(err))
+        household = json.loads(dumps_for_api(store.load(household_id_now())))
+        return JSONResponse({"messages": transcript.messages, "state": household})
+
     if os.environ.get("WHATSAPP_INBOX") == "on":
         whatsapp = WhatsApp()
 
@@ -965,90 +1075,9 @@ def create_app(
                 return
             user = current_user.set(link["household"])
             try:
-                await whatsapp_reply(m)
+                await whatsapp_reply(m, whatsapp)
             finally:
                 current_user.reset(user)
-
-        async def whatsapp_reply(m: Inbound) -> None:
-            to = m.sender
-            send = lambda fn, *args: anyio.to_thread.run_sync(fn, to, *args)  # noqa: E731
-            scan_key = f"{household_id_now()}#whatsapp-scan"
-            words = m.text.lower().strip(" !.?")
-
-            if m.kind in ("image", "document"):
-                if m.mime not in READABLE_MEDIA:
-                    await send(whatsapp.text, "I can read photos (JPEG or PNG) and PDF bills. Please send one of those.")
-                    return
-                await send(whatsapp.text, "Got it, reading your " + ("bill" if m.kind == "document" else "photo") + " with Amazon Nova…")
-                data = await anyio.to_thread.run_sync(whatsapp.download, m.media_id)
-                url = f"data:{m.mime};base64,{base64.b64encode(data).decode()}"
-                kind = "receipt" if m.kind == "document" or any(w in words for w in ("bill", "receipt", "invoice")) else "auto"
-                args = {"document": url} if m.kind == "document" else {"images": [url]}
-                async with Client(mcp) as client:
-                    result = await client.call_tool("scan_pantry", {**args, "kind": kind})
-                items = (result.structured_content or {}).get("items", []) if not result.is_error else []
-                if not items:
-                    await send(whatsapp.text, "I couldn't spot any groceries in that. Try a closer, brighter photo, or a clear photo of the bill.")
-                    return
-                await anyio.to_thread.run_sync(store.save_record, scan_key, {"items": items, "at": time.time()})
-                await send(
-                    whatsapp.buttons,
-                    f"I found {len(items)} item{'s' if len(items) != 1 else ''}:\n\n{item_lines(items)}\n\nAdd them to your pantry?",
-                    [("scan_add", "Add to pantry"), ("scan_cancel", "Cancel")],
-                )
-                return
-
-            if m.kind == "button" and m.button in ("scan_add", "scan_cancel"):
-                pending = await anyio.to_thread.run_sync(store.load_record, scan_key)
-                await anyio.to_thread.run_sync(store.delete_record, scan_key)
-                if m.button == "scan_cancel" or not pending:
-                    await send(whatsapp.text, "Okay, nothing added." if pending or m.button == "scan_cancel" else "That scan has expired. Send the photo again.")
-                    return
-                async with Client(mcp) as client:
-                    async for _ in _turn_events({"confirmItems": pending["items"]}, client):
-                        pass
-                count = len(pending["items"])
-                await send(
-                    whatsapp.buttons,
-                    f"Done, I added {count} item{'s' if count != 1 else ''} to your pantry. Want a meal idea that uses them?",
-                    [("meal", "Meal idea"), ("list", "Grocery list")],
-                )
-                return
-
-            if (m.kind == "button" and m.button == "scan") or words in WHATSAPP_SCAN_WORDS:
-                await send(
-                    whatsapp.link,
-                    "Send me a photo of your groceries, your fridge or the bill right here, and I'll add the items "
-                    "to your pantry. Or open the camera in Pantry Pilot:",
-                    "Open the camera",
-                    f"{APP_URL}/?scan=1",
-                )
-                return
-
-            if m.kind == "text" and words in WHATSAPP_HELLO:
-                await send(
-                    whatsapp.buttons,
-                    "Hi, I'm Pantry Pilot 👋 Ask me anything about your kitchen: what to cook, what's running out, "
-                    "your grocery list, or prices on Zepto and Swiggy. Send a photo of your groceries or a bill "
-                    "and I'll add them to your pantry.",
-                    [("meal", "What to cook"), ("list", "Grocery list"), ("scan", "Scan groceries")],
-                )
-                return
-
-            text = WHATSAPP_BUTTON_TEXT.get(m.button, "") if m.kind == "button" else m.text
-            if not text:
-                await send(whatsapp.text, "I can read text, photos and PDF bills. Try “what should I cook?” or send a photo of your groceries.")
-                return
-            replies: list[str] = []
-            turn = ordering.current_turn.set({"id": new_id(), "text": text})
-            try:
-                async with Client(mcp) as client:
-                    async for event in _turn_events({"text": text}, client):
-                        if event["type"] == "reply" and event.get("text"):
-                            replies.append(event["text"])
-            finally:
-                ordering.current_turn.reset(turn)
-            await send(whatsapp.text, "\n\n".join(replies) or "Sorry, I didn't get an answer for that. Please try again.")
 
     @mcp.custom_route("/health", methods=["GET"])
     async def health(_: Request) -> Response:

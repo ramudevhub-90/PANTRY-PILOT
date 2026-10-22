@@ -3,6 +3,7 @@ import { ClipboardPaste, ExternalLink, Link2, Mail, MessageCircle, RefreshCw, Sh
 import { api, type Connector, type KrogerStatus } from '../agent/remote';
 import { availableHere } from '../lib/region';
 import { usePantry } from '../state/store';
+import { WhatsAppPreview } from './WhatsAppPreview';
 
 const touchScreen = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
 
@@ -59,6 +60,8 @@ export function ConnectorsCard() {
   const { state, dispatch } = usePantry();
   const region = state.preferences.region;
   const [whatsapp, setWhatsapp] = useState('');
+  // /?whatsapp=1 opens the in-app WhatsApp chat straight away (handy for demos).
+  const [chatOpen, setChatOpen] = useState(() => new URLSearchParams(window.location.search).get('whatsapp') === '1');
   const [editingWhatsapp, setEditingWhatsapp] = useState(false);
   const [connectors, setConnectors] = useState<Connector[] | null>(null);
   const [connecting, setConnecting] = useState<Connector['id'] | null>(null);
@@ -361,17 +364,32 @@ export function ConnectorsCard() {
         )}
       </div>
 
-      {state.notifications.whatsapp && (
-        <div className="apps__whatsapp-chat">
-          <div>
-            <strong>Chat with Pantry Pilot on WhatsApp</strong>
-            <span>Ask what to cook, check your list, or send a photo of your groceries or bill to add them to your pantry.</span>
-          </div>
-          <a className="btn btn--sm" href={WHATSAPP_CHAT_URL} target="_blank" rel="noreferrer">
-            <MessageCircle size={15} aria-hidden="true" />
-            Open WhatsApp
-          </a>
+      <div className="apps__whatsapp-chat">
+        <div>
+          <strong>Chat with Pantry Pilot on WhatsApp</strong>
+          <span>Ask what to cook, check your list, or send a photo of your groceries or bill to add them to your pantry.</span>
         </div>
+        <div className="apps__whatsapp-actions">
+          <button type="button" className="btn btn--sm" onClick={() => setChatOpen(true)}>
+            <MessageCircle size={15} aria-hidden="true" />
+            Try it here
+          </button>
+          {state.notifications.whatsapp && (
+            <a className="btn btn--secondary btn--sm" href={WHATSAPP_CHAT_URL} target="_blank" rel="noreferrer">
+              Open WhatsApp
+            </a>
+          )}
+        </div>
+      </div>
+      {chatOpen && (
+        <WhatsAppPreview
+          onClose={() => {
+            setChatOpen(false);
+            const url = new URL(window.location.href);
+            url.searchParams.delete('whatsapp');
+            window.history.replaceState(null, '', url);
+          }}
+        />
       )}
 
       <p className="apps__notify muted small-print">

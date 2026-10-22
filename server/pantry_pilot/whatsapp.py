@@ -146,3 +146,26 @@ def item_lines(items: list[dict[str, Any]], limit: int = 15) -> str:
     if len(items) > limit:
         lines.append(f"…and {len(items) - limit} more")
     return "\n".join(lines)
+
+
+class WhatsAppTranscript:
+    """Stands in for WhatsApp in the app's chat preview: records the replies instead of sending them."""
+
+    def __init__(self, media: bytes = b"") -> None:
+        self.messages: list[dict[str, Any]] = []
+        self.media = media
+
+    def text(self, _to: str, text: str) -> None:
+        self.messages.append({"kind": "text", "text": text})
+
+    def buttons(self, _to: str, text: str, buttons: list[tuple[str, str]]) -> None:
+        self.messages.append({"kind": "buttons", "text": text, "buttons": [{"id": i, "title": t[:20]} for i, t in buttons[:3]]})
+
+    def link(self, _to: str, text: str, label: str, url: str) -> None:
+        self.messages.append({"kind": "link", "text": text, "label": label[:20], "url": url})
+
+    def mark_read(self, _message_id: str) -> None:
+        pass
+
+    def download(self, _media_id: str) -> bytes:
+        return self.media

@@ -1,3 +1,4 @@
+import base64
 import json
 
 import pytest
@@ -116,3 +117,29 @@ def test_photo_then_add_puts_items_in_the_pantry(inbox):
     client.post("/events", json=sqs({"id": "m2", "from": "919876543210", "type": "interactive", "interactive": {"button_reply": {"id": "scan_add", "title": "Add to pantry"}}}))
     assert "added" in FakeWhatsApp.sent[-1][2]
     assert store.load("alice").inventory != before
+
+
+@pytest.fixture
+def app_client():
+    store = MemoryStore()
+    with TestClient(create_app(store, MockNova(), "alice")) as client:
+        yield client, store
+
+
+def test_preview_runs_the_same_replies_as_whatsapp(app_client):
+    client, _ = app_client
+    menu = client.post("/api/whatsapp/preview", json={"text": "hi"}).json()["messages"]
+    assert menu[0]["kind"] == "buttons" and [b["id"] for b in menu[0]["buttons"]] == ["meal", "list", "scan"]
+    scan = client.post("/api/whatsapp/preview", json={"button": "scan"}).json()["messages"]
+    assert scan[0]["kind"] == "link" and scan[0]["url"].endswith("/?scan=1")
+
+
+def test_preview_photo_then_add_updates_the_pantry(app_client):
+    client, store = app_client
+    before = store.load("alice").inventory
+    png = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 64).decode()
+    found = client.post("/api/whatsapp/preview", json={"image": png}).json()["messages"]
+    assert found[0]["text"].startswith("Got it") and found[-1]["kind"] == "buttons"
+    added = client.post("/api/whatsapp/preview", json={"button": "scan_add"}).json()
+    assert "added" in added["messages"][-1]["text"] and store.load("alice").inventory != before
+    assert added["state"]["inventory"]

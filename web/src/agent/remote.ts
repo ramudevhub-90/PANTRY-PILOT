@@ -180,6 +180,11 @@ export interface ServerHealth {
   tools: number;
 }
 
+export type WhatsAppReply =
+  | { kind: 'text'; text: string }
+  | { kind: 'buttons'; text: string; buttons: { id: string; title: string }[] }
+  | { kind: 'link'; text: string; label: string; url: string };
+
 export const api = {
   /** Public: whether sign-in is on, and the Cognito settings to sign in with. */
   config: async (): Promise<{ auth: AuthSettings | null }> => {
@@ -265,6 +270,17 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ number }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? `Server error ${response.status}`);
+    return body;
+  },
+  /** The WhatsApp chat inside the app: the same replies the Pantry Pilot number sends. */
+  whatsappPreview: async (message: { text?: string; button?: string; image?: string }): Promise<{ messages: WhatsAppReply[]; state: ServerState }> => {
+    const response = await apiFetch('/api/whatsapp/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(message),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error ?? `Server error ${response.status}`);
