@@ -163,3 +163,21 @@ def test_meta_webhook_handshake_and_signature(app_client, monkeypatch):
     signature = "sha256=" + hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()
     assert client.post("/api/whatsapp/webhook", content=body, headers={"x-hub-signature-256": signature}).status_code == 200
     assert client.post("/api/whatsapp/webhook", content=body, headers={"x-hub-signature-256": "sha256=bad"}).status_code == 401
+
+
+def test_judge_pantry_is_refreshed_daily():
+    from pantry_pilot.app import DemoRefreshStore
+    from pantry_pilot.models import DEMO_PANTRY
+
+    inner = MemoryStore()
+    stale = inner.load("judge")
+    stale.inventory = stale.inventory[:1]
+    inner.save("judge", stale)
+    store = DemoRefreshStore(inner, lambda user: user == "judge")
+    fresh = store.load("judge")
+    assert len(fresh.inventory) == len(DEMO_PANTRY)
+    assert {i.name: i.days_left for i in fresh.inventory}["Coriander"] == 1
+    fresh.inventory = fresh.inventory[:3]
+    store.save("judge", fresh)
+    assert len(store.load("judge").inventory) == 3  # the judge's own changes last for the day
+    assert len(store.load("someone").inventory) == len(inner.load("someone").inventory)

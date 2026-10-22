@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Callable
 from datetime import date, timedelta
@@ -38,6 +39,35 @@ CONFIDENT = 0.85
 _DEFAULT_SHELF_LIFE: dict[str, int] = {
     "produce": 5, "dairy": 7, "protein": 3, "grains": 180, "pantry": 180, "condiments": 365,
 }
+
+# Items added without a category (often by voice: "we bought chicken and tomatoes") used to land
+# in "pantry" with a 6-month shelf life. Common foods get their real category and shelf life.
+_KNOWN_SHELF_LIFE: list[tuple[tuple[str, ...], Category, int]] = [
+    (("chicken", "mutton", "fish", "prawn", "shrimp", "rohu", "hilsa", "meat", "keema", "salmon"), "protein", 2),
+    (("tofu",), "protein", 5),
+    (("egg",), "protein", 14),
+    (("milk",), "dairy", 3),
+    (("paneer", "curd", "yogurt", "yoghurt", "dahi", "cream"), "dairy", 5),
+    (("butter", "ghee"), "dairy", 30),
+    (("cheese", "cheddar"), "dairy", 21),
+    (("bread", "pav", "bun"), "grains", 4),
+    (("coriander", "cilantro", "mint", "spinach", "palak", "methi", "lettuce", "greens", "basil", "curry leaves"), "produce", 3),
+    (("tomato", "cucumber", "capsicum", "bell pepper", "brinjal", "eggplant", "okra", "bhindi", "beans",
+      "broccoli", "cauliflower", "cabbage", "mushroom", "banana", "grape", "berry", "berries", "mango", "papaya",
+      "chilli", "chili", "lemon", "lime", "carrot", "gourd", "peas", "corn"), "produce", 5),
+    (("apple", "orange"), "produce", 14),
+    (("ginger", "garlic", "onion", "potato", "sweet potato", "pumpkin", "yam"), "produce", 25),
+]
+
+
+def _guess_shelf_life(name: str) -> tuple[Category, int] | None:
+    """Whole words only (plurals allowed), so "eggplant" isn't eggs and "chickpeas" aren't peas."""
+    words = name.lower()
+    for keys, category, days in _KNOWN_SHELF_LIFE:
+        if any(re.search(rf"\b{re.escape(k)}(e?s)?\b", words) for k in keys):
+            return category, days
+    return None
+
 
 # Units that convert into each other: unit -> (base unit, factor).
 _CONVERTIBLE: dict[str, tuple[str, float]] = {"g": ("g", 1), "kg": ("g", 1000), "ml": ("ml", 1), "L": ("ml", 1000)}
@@ -155,8 +185,14 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
                 if change.quantity is None or not change.unit:
                     not_found.append(change.name)
                     continue
-                category = change.category or (existing.category if existing else "pantry")
-                days = change.expires_in_days if change.expires_in_days is not None else _DEFAULT_SHELF_LIFE[category]
+                guess = _guess_shelf_life(change.name)
+                category = change.category or (existing.category if existing else guess[0] if guess else "pantry")
+                if change.expires_in_days is not None:
+                    days = change.expires_in_days
+                elif guess and (change.category is None or change.category == guess[0]):
+                    days = guess[1]
+                else:
+                    days = _DEFAULT_SHELF_LIFE[category]
                 expires = today + timedelta(days=days)
                 if existing and (qty := _convert(change.quantity, change.unit, existing.unit)) is not None:
                     existing.quantity = round(existing.quantity + qty, 2)

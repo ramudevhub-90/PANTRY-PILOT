@@ -123,3 +123,17 @@ def test_grocery_from_a_meal_adds_only_its_missing_items_and_items_can_be_remove
     call(store, "build_grocery_list", {"items": ["milk", "eggs"]})
     result = call(store, "remove_from_grocery_list", {"items": ["Milk"]})
     assert result["removed"] == ["Milk"] and "Milk" not in call(store, "get_grocery_list")["items"]
+
+
+def test_voice_adds_get_real_shelf_lives(store):
+    call(store, "update_inventory", {"action": "add", "items": [
+        {"name": "Chicken", "quantity": 1, "unit": "kg"},
+        {"name": "Tomatoes", "quantity": 500, "unit": "g"},
+        {"name": "Eggplant", "quantity": 2, "unit": "pcs"},
+        {"name": "Chickpeas", "quantity": 1, "unit": "kg"},
+    ]})
+    items = {i.name: (i.category, i.days_left) for i in store.load("test").inventory}
+    assert items["Chicken"] == ("protein", 2)
+    assert items["Tomatoes"] == ("produce", 5)
+    assert items["Eggplant"] == ("produce", 5)  # not eggs
+    assert items["Chickpeas"] == ("pantry", 180)  # dried, not peas

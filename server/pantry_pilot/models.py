@@ -151,6 +151,40 @@ _SEED: list[tuple[str, str, float, str, Category, int]] = [
 ]
 
 
+# The judges' account: a Bengali family in Bengaluru, as in the demo film. Refreshed daily (see
+# app.py) so the dates stay relative to today: spinach and coriander always expire tomorrow.
+DEMO_PANTRY: list[tuple[str, str, float, str, Category, int]] = [
+    ("Spinach", "🥬", 1, "bunch", "produce", 1),
+    ("Coriander", "🌿", 1, "bunch", "produce", 1),
+    ("Rohu fish", "🐟", 500, "g", "protein", 1),
+    ("Paneer", "🧀", 200, "g", "dairy", 2),
+    ("Milk", "🥛", 1, "L", "dairy", 2),
+    ("Tomatoes", "🍅", 500, "g", "produce", 3),
+    ("Curd", "🥣", 400, "g", "dairy", 3),
+    ("Brinjal", "🍆", 2, "pcs", "produce", 4),
+    ("Green chillies", "🌶️", 100, "g", "produce", 5),
+    ("Eggs", "🥚", 6, "pcs", "protein", 8),
+    ("Ginger", "🫚", 100, "g", "produce", 14),
+    ("Garlic", "🧄", 1, "bulb", "produce", 20),
+    ("Potatoes", "🥔", 1, "kg", "produce", 25),
+    ("Onions", "🧅", 1, "kg", "produce", 25),
+    ("Atta", "🌾", 1, "kg", "grains", 90),
+    ("Basmati rice", "🍚", 1, "kg", "grains", 180),
+    ("Red lentils", "🫘", 500, "g", "pantry", 180),
+    ("Mustard oil", "🫒", 500, "ml", "condiments", 365),
+]
+DEMO_GROCERY = ["Mustard seeds", "Bananas", "Bread"]
+
+
+def demo_inventory() -> list[PantryItem]:
+    today = date.today()
+    return [
+        PantryItem(id=f"demo-{i}", name=name, emoji=emoji, quantity=qty, unit=unit, category=category,
+                   expires_on=today + timedelta(days=days), source="seed")
+        for i, (name, emoji, qty, unit, category, days) in enumerate(DEMO_PANTRY)
+    ]
+
+
 def seed_household() -> Household:
     """A believable starting pantry so a fresh demo has something to plan around."""
     today = date.today()

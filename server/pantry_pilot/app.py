@@ -12,6 +12,7 @@ import os
 import time
 import urllib.parse
 from collections.abc import AsyncIterator, Callable
+from datetime import date
 from typing import Any, Literal
 
 import anyio
@@ -46,7 +47,7 @@ from .kroger import CART_URL, Kroger, KrogerError, kroger_from_env
 from .mcp_server import CONFIDENT, create_server
 from .mealtime import TimezoneMiddleware
 from .notify import WHATSAPP_TEMPLATES, Message, _cognito_email, Notifier, NotifyUnavailable, normalise_whatsapp
-from .models import GroceryItem, new_id
+from .models import DEMO_GROCERY, GroceryItem, demo_inventory, new_id
 from .nova import BedrockNova, Nova, NovaUnavailable, nova_from_env
 from .store import Store, dumps_for_api, store_from_env
 from .whatsapp import READABLE_MEDIA, Inbound, WhatsApp, WhatsAppTranscript, item_lines, parse_event, verify_signature
@@ -89,6 +90,32 @@ HEARTBEAT_SECONDS = 10
 """A conversation older than this starts fresh."""
 
 
+class DemoRefreshStore:
+    """Wraps the store so the judges' account starts each day with a fresh pantry: its sample items
+    carry dates relative to today, so they'd otherwise all have expired by judging. Everything
+    else (and every other account) passes straight through."""
+
+    def __init__(self, inner: Store, is_demo: Callable[[str], bool]) -> None:
+        self._inner, self._is_demo = inner, is_demo
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def load(self, household_id: str):  # noqa: ANN201 - same as Store.load
+        household = self._inner.load(household_id)
+        if not self._is_demo(household_id):
+            return household
+        today = date.today().isoformat()
+        marker = f"{household_id}#demo-day"
+        if (self._inner.load_record(marker) or {}).get("day") != today:
+            household.inventory = demo_inventory()
+            household.grocery = [GroceryItem(name=n) for n in DEMO_GROCERY]
+            household.meals, household.timers = [], []
+            self._inner.save(household_id, household)
+            self._inner.save_record(marker, {"day": today})
+        return household
+
+
 def create_app(
     store: Store | None = None,
     nova: Nova | None = None,
@@ -126,6 +153,16 @@ def create_app(
         except Exception:
             return False
 
+    demo_users: dict[str, bool] = {}
+
+    def is_demo(user: str) -> bool:
+        if not auth or user == default_household:
+            return False
+        if user not in demo_users:
+            demo_users[user] = demo_account(user)
+        return demo_users[user]
+
+    store = DemoRefreshStore(store, is_demo)
     mcp = create_server(store, nova, household_id_now)
 
     # The conversation is kept in the store, not in memory: Lambda runs several copies of the server
