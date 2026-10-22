@@ -22,6 +22,12 @@ const sesRoleArn: string | undefined = app.node.tryGetContext('sesRole') || unde
 const whatsappPhoneId: string | undefined = app.node.tryGetContext('whatsappPhone') || undefined;
 // Fixed sign-in code for the judges' demo account, from the DEMO_CODE GitHub secret (off when unset).
 const demoCode: string | undefined = process.env.DEMO_CODE || undefined;
+// Meta Cloud API test number for WhatsApp replies while our own number awaits display-name approval
+// (GitHub secrets META_WA_PHONE_ID, META_WA_TOKEN, META_APP_SECRET; all three or none).
+const metaWhatsApp =
+  process.env.META_WA_PHONE_ID && process.env.META_WA_TOKEN && process.env.META_APP_SECRET
+    ? { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN, appSecret: process.env.META_APP_SECRET }
+    : undefined;
 const instacartEnv = app.node.tryGetContext('instacart') === 'production' ? 'production' : 'development';
 
 new PantryPilotStack(app, 'PantryPilot', {
@@ -35,4 +41,5 @@ new PantryPilotStack(app, 'PantryPilot', {
   instacartEnv,
   whatsappPhoneId,
   demoCode,
+  metaWhatsApp,
 });

@@ -48,7 +48,7 @@ from .notify import WHATSAPP_TEMPLATES, Message, _cognito_email, Notifier, Notif
 from .models import GroceryItem, new_id
 from .nova import BedrockNova, Nova, NovaUnavailable, nova_from_env
 from .store import Store, dumps_for_api, store_from_env
-from .whatsapp import READABLE_MEDIA, Inbound, WhatsApp, WhatsAppTranscript, item_lines, parse_event
+from .whatsapp import READABLE_MEDIA, Inbound, WhatsApp, WhatsAppTranscript, item_lines, parse_event, verify_signature
 
 
 def _env_list(name: str) -> list[str]:
@@ -1009,6 +1009,29 @@ def create_app(
         finally:
             ordering.current_turn.reset(turn)
         await send(wa.text, "\n\n".join(replies) or "Sorry, I didn't get an answer for that. Please try again.")
+
+    @mcp.custom_route("/api/whatsapp/webhook", methods=["GET", "POST"])
+    async def meta_webhook(request: Request) -> Response:
+        """Meta's Cloud API webhook (test number): GET is the subscription handshake; POST carries
+        messages, which go to the same SQS inbox as End User Messaging's, so one Lambda answers both."""
+        if request.method == "GET":
+            q = request.query_params
+            if q.get("hub.mode") == "subscribe" and q.get("hub.verify_token") == os.environ.get("META_WA_VERIFY_TOKEN", "pantry-pilot-webhook"):
+                return Response(q.get("hub.challenge", ""), media_type="text/plain")
+            return Response("Forbidden", status_code=403)
+        body = await request.body()
+        if not verify_signature(os.environ.get("META_APP_SECRET", ""), body, request.headers.get("x-hub-signature-256", "")):
+            return Response("Bad signature", status_code=401)
+        queue = os.environ.get("WHATSAPP_INBOX_QUEUE_URL")
+        if queue:
+            import boto3
+
+            sqs = boto3.client("sqs")
+            for entry in json.loads(body).get("entry", []):
+                await anyio.to_thread.run_sync(
+                    lambda e=entry: sqs.send_message(QueueUrl=queue, MessageBody=json.dumps({"whatsAppWebhookEntry": e}))
+                )
+        return Response("OK", media_type="text/plain")
 
     @mcp.custom_route("/api/whatsapp/preview", methods=["POST"])
     async def whatsapp_preview(request: Request) -> Response:

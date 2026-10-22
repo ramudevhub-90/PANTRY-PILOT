@@ -143,3 +143,18 @@ def test_preview_photo_then_add_updates_the_pantry(app_client):
     added = client.post("/api/whatsapp/preview", json={"button": "scan_add"}).json()
     assert "added" in added["messages"][-1]["text"] and store.load("alice").inventory != before
     assert added["state"]["inventory"]
+
+
+def test_meta_webhook_handshake_and_signature(app_client, monkeypatch):
+    import hashlib
+    import hmac
+
+    client, _ = app_client
+    ok = client.get("/api/whatsapp/webhook", params={"hub.mode": "subscribe", "hub.verify_token": "pantry-pilot-webhook", "hub.challenge": "42"})
+    assert ok.status_code == 200 and ok.text == "42"
+    assert client.get("/api/whatsapp/webhook", params={"hub.mode": "subscribe", "hub.verify_token": "wrong", "hub.challenge": "42"}).status_code == 403
+    monkeypatch.setenv("META_APP_SECRET", "s3cret")
+    body = b'{"entry": []}'
+    signature = "sha256=" + hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()
+    assert client.post("/api/whatsapp/webhook", content=body, headers={"x-hub-signature-256": signature}).status_code == 200
+    assert client.post("/api/whatsapp/webhook", content=body, headers={"x-hub-signature-256": "sha256=bad"}).status_code == 401

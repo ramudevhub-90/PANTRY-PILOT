@@ -177,7 +177,8 @@ def is_mcp_path(path: str) -> bool:
     return path == "/mcp" or path.startswith("/mcp/")
 
 
-PUBLIC_API_PATHS = {"/api/config", "/api/auth/start"}
+# /api/whatsapp/webhook is Meta calling us; it checks Meta's signature instead of a sign-in.
+PUBLIC_API_PATHS = {"/api/config", "/api/auth/start", "/api/whatsapp/webhook"}
 # A shopping app sends the browser back here after its sign-in; the one-time state names the user.
 _CONNECTOR_CALLBACK = re.compile(r"^/api/(connectors/[a-z]+|kroger)/callback$")
 

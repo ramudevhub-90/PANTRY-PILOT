@@ -42,6 +42,8 @@ export interface PantryPilotStackProps extends cdk.StackProps {
   sesRoleArn?: string;
   /** Fixed 6-digit sign-in code for the judges' demo account (see verify-challenge.mjs). */
   demoCode?: string;
+  /** Meta Cloud API test number used for WhatsApp replies instead of End User Messaging (server/pantry_pilot/whatsapp.py). */
+  metaWhatsApp?: { phoneId: string; token: string; appSecret: string };
   /** Which Instacart Developer Platform keys to use: "development" (default) or "production". */
   instacartEnv?: 'development' | 'production';
 }
@@ -233,6 +235,9 @@ export class PantryPilotStack extends cdk.Stack {
       KROGER_CREDENTIALS_PARAM,
       KROGER_ENV: 'production',
       ...(domainName ? { APP_URL: `https://${domainName}` } : {}),
+      ...(props.metaWhatsApp
+        ? { META_WA_PHONE_ID: props.metaWhatsApp.phoneId, META_WA_TOKEN: props.metaWhatsApp.token, META_APP_SECRET: props.metaWhatsApp.appSecret }
+        : {}),
     };
     const server = new lambda.Function(this, 'Server', {
       description: 'Pantry Pilot MCP server, Nova agent and web API',
@@ -357,6 +362,9 @@ export class PantryPilotStack extends cdk.Stack {
         },
       });
       inbox.addEventSource(new lambdaEvents.SqsEventSource(inboxQueue, { batchSize: 1 }));
+      // Meta's Cloud API webhook (/api/whatsapp/webhook) queues its messages for the same inbox.
+      inboxQueue.grantSendMessages(server);
+      server.addEnvironment('WHATSAPP_INBOX_QUEUE_URL', inboxQueue.queueUrl);
     }
     // Spoken replies: Amazon Polly reads the assistant's answers aloud (phones play this reliably).
     server.addToRolePolicy(new iam.PolicyStatement({ actions: ['polly:SynthesizeSpeech'], resources: ['*'] }));

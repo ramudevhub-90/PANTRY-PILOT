@@ -80,17 +80,58 @@ def _inbound(m: dict[str, Any]) -> Inbound:
     return Inbound(**base, kind="other")
 
 
+GRAPH = "https://graph.facebook.com/v21.0"
+
+
+def meta_test_number() -> tuple[str, str] | None:
+    """(phone number id, token) when replies go through Meta's Cloud API test number instead of
+    AWS End User Messaging (while Meta reviews our own number's display name)."""
+    phone, token = os.environ.get("META_WA_PHONE_ID", ""), os.environ.get("META_WA_TOKEN", "")
+    return (phone, token) if phone and token else None
+
+
+def _graph(method: str, url: str, token: str, body: dict[str, Any] | None = None) -> bytes:
+    import urllib.request
+
+    request = urllib.request.Request(url, method=method, data=json.dumps(body).encode() if body else None)
+    request.add_header("Authorization", f"Bearer {token}")
+    if body:
+        request.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.read()
+    except urllib.error.HTTPError as err:
+        detail = err.read()[:500].decode(errors="replace")
+        log.warning("WhatsApp Cloud API %s failed: %s %s", url.split("?")[0], err.code, detail)
+        raise
+
+
+def verify_signature(app_secret: str, body: bytes, header: str) -> bool:
+    """Meta signs webhook bodies with the app secret (X-Hub-Signature-256: sha256=<hex>)."""
+    import hashlib
+    import hmac
+
+    expected = "sha256=" + hmac.new(app_secret.encode(), body, hashlib.sha256).hexdigest()
+    return bool(app_secret) and hmac.compare_digest(expected, header or "")
+
+
 class WhatsApp:
-    """Free-form replies and media downloads through AWS End User Messaging Social."""
+    """Free-form replies and media downloads through AWS End User Messaging Social, or through
+    Meta's Cloud API test number when META_WA_PHONE_ID and META_WA_TOKEN are set."""
 
     def __init__(self, phone_id: str | None = None, media_bucket: str | None = None) -> None:
         self.phone_id = phone_id or os.environ.get("WHATSAPP_PHONE_ID", "")
         self.media_bucket = media_bucket or os.environ.get("WHATSAPP_MEDIA_BUCKET", "")
+        self.meta = meta_test_number()
 
     def _send(self, to: str, body: dict[str, Any]) -> None:
+        message = {"messaging_product": "whatsapp", "recipient_type": "individual", "to": to, **body}
+        if self.meta:
+            phone, token = self.meta
+            _graph("POST", f"{GRAPH}/{phone}/messages", token, message)
+            return
         import boto3
 
-        message = {"messaging_product": "whatsapp", "recipient_type": "individual", "to": to, **body}
         boto3.client("socialmessaging").send_whatsapp_message(
             originationPhoneNumberId=self.phone_id, message=json.dumps(message).encode(), metaApiVersion="v20.0"
         )
@@ -113,6 +154,9 @@ class WhatsApp:
 
         try:
             message = {"messaging_product": "whatsapp", "status": "read", "message_id": message_id}
+            if self.meta:
+                _graph("POST", f"{GRAPH}/{self.meta[0]}/messages", self.meta[1], message)
+                return
             boto3.client("socialmessaging").send_whatsapp_message(
                 originationPhoneNumberId=self.phone_id, message=json.dumps(message).encode(), metaApiVersion="v20.0"
             )
@@ -121,6 +165,10 @@ class WhatsApp:
 
     def download(self, media_id: str) -> bytes:
         """The photo or PDF someone sent, via a short-lived object in the media bucket."""
+        if self.meta:
+            token = self.meta[1]
+            url = json.loads(_graph("GET", f"{GRAPH}/{media_id}", token))["url"]
+            return _graph("GET", url, token)
         import boto3
 
         key = f"inbound/{uuid.uuid4().hex}"
