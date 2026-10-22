@@ -257,7 +257,7 @@ def to_meals(
         main_words = _words(main) - _GENERIC or _words(main)
         if main and any(main_words & _words(m) for m in missing_raw):
             continue
-        if not any(_pantry_item(inventory, str(u)) for u in dish.get("uses") or []) and not (main and _pantry_item(inventory, main)):
+        if main and not _pantry_item(inventory, main) and not any(_pantry_item(inventory, str(u)) for u in dish.get("uses") or []):
             continue
         uses: list[PantryItem] = []
         for wanted in dish.get("uses") or []:

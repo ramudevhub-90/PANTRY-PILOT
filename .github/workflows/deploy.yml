@@ -38,7 +38,15 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install --quiet -e . pytest httpx
-          .venv/bin/pytest -q
+          # Failures also go out as annotations, readable without signing in to GitHub.
+          set +e
+          .venv/bin/pytest -q -rf --tb=line 2>&1 | tee pytest.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            grep -E "^(FAILED|ERROR)|^/.*:[0-9]+: " pytest.log | head -9 | while IFS= read -r line; do echo "::error::$line"; done
+          fi
+          exit "$status"
 
       - uses: actions/setup-node@v4
         with:
