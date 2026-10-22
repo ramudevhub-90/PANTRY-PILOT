@@ -84,7 +84,9 @@ export function InventoryCard() {
       </header>
 
       {fromWhatsApp && (
-        <div className="scan-prompt" ref={(el) => el?.scrollIntoView({ block: 'center' })}>
+        <div className="scan-prompt" ref={(el) => {
+            el?.scrollIntoView({ block: 'center' });
+          }}>
           <Camera size={22} aria-hidden="true" />
           <div>
             <strong>Scan your groceries</strong>

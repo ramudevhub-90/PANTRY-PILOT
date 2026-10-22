@@ -16,7 +16,9 @@ export function AddItemForm({ onDone }: { onDone: () => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => nameRef.current?.focus(), []);
+  useEffect(() => {
+    nameRef.current?.focus();
+  }, []);
 
   function pickCategory(next: Category) {
     setCategory(next);

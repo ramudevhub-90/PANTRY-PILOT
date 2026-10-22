@@ -23,7 +23,10 @@ export function WhatsAppPreview({ onClose }: { onClose: () => void }) {
   const endRef = useRef<HTMLDivElement>(null);
   const started = useRef(false);
 
-  useEffect(() => endRef.current?.scrollIntoView({ block: 'end' }), [bubbles, busy]);
+  // Braces matter: newer browsers return a Promise from scrollIntoView, and React would call it as a cleanup.
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'end' });
+  }, [bubbles, busy]);
 
   async function send(message: { text?: string; button?: string; image?: string }, shown: Bubble) {
     setBubbles((b) => [...b, { ...shown, at: time() }]);
