@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import contextlib
 import json
 import logging
 import os
@@ -19,13 +21,14 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 
-from . import connectors, ordering, voice
+from . import connectors, oauth_app, ordering, voice
 from .agent import call_tool_with_events, requested_language, run_agent
 from .auth import (
     ALL_SCOPES,
     AccountDirectory,
     AuthConfig,
     BearerAuthMiddleware,
+    EitherVerifier,
     TokenVerifier,
     authorization_server_metadata,
     authorize_redirect,
@@ -88,6 +91,7 @@ def create_app(
     kroger: Kroger | None = None,
     speaker: voice.Speaker | None = None,
     notifier: Notifier | None = None,
+    oauth_refresh: oauth_app.Refresh | None = None,
 ) -> Starlette:
     """`household_id` is the pantry used when nobody is signed in (local development without
     Cognito). With Cognito configured, each signed-in user gets their own pantry."""
@@ -154,13 +158,71 @@ def create_app(
         async def server_metadata(request: Request) -> Response:
             return authorization_server_metadata(request)
 
+        # Claude (and other first-party MCP clients) sign in on Pantry Pilot's own page, with the
+        # emailed code, instead of Cognito's password-only hosted login. See oauth_app.py.
+        first_party = {cid: "Claude" for cid in _env_list("COGNITO_CLAUDE_CLIENT_ID")}
+        refresh = oauth_refresh or (
+            oauth_app.cognito_refresh(auth.region, auth.web_client_id) if auth.web_client_id else None
+        )
+        web_tokens = TokenVerifier(auth, signing_key or jwks_signing_key(auth), client_ids={auth.web_client_id})
+
+        def oauth_error(err: oauth_app.OAuthError) -> JSONResponse:
+            return JSONResponse({"error": err.error, "error_description": err.description}, status_code=err.status)
+
         @mcp.custom_route("/oauth/authorize", methods=["GET"])
         async def authorize(request: Request) -> Response:
-            return authorize_redirect(auth, request)
+            params = dict(request.query_params)
+            if params.get("client_id") not in first_party or not refresh:
+                return authorize_redirect(auth, request)
+            try:
+                request_id = await anyio.to_thread.run_sync(oauth_app.start, store, params, first_party)
+            except oauth_app.OAuthError as err:
+                return oauth_error(err)
+            return RedirectResponse(f"/?oauth={request_id}", status_code=302)
 
         @mcp.custom_route("/oauth/token", methods=["POST"])
         async def token(request: Request) -> Response:
-            return await token_proxy(auth, request)
+            form = dict(urllib.parse.parse_qsl((await request.body()).decode(), keep_blank_values=True))
+            client_id = form.get("client_id", "")
+            if basic := request.headers.get("authorization", ""):
+                with contextlib.suppress(ValueError):
+                    client_id = base64.b64decode(basic.split()[-1]).decode().split(":", 1)[0] or client_id
+            if client_id not in first_party or not refresh:
+                return await token_proxy(auth, request)
+            try:
+                tokens = await anyio.to_thread.run_sync(oauth_app.token, store, form, client_id, refresh)
+            except oauth_app.OAuthError as err:
+                return oauth_error(err)
+            return JSONResponse(tokens, headers={"Cache-Control": "no-store"})
+
+        @mcp.custom_route("/api/oauth/requests/{request_id}", methods=["GET"])
+        async def oauth_request(request: Request) -> Response:
+            try:
+                pending = oauth_app.pending(store, request.path_params["request_id"])
+            except oauth_app.OAuthError as err:
+                return oauth_error(err)
+            return JSONResponse({"client": pending["client_name"], "redirectHost": urllib.parse.urlparse(pending["redirect_uri"]).netloc})
+
+        @mcp.custom_route("/api/oauth/requests/{request_id}/approve", methods=["POST"])
+        async def oauth_approve(request: Request) -> Response:
+            body = await request.json()
+            subject = lambda access: web_tokens.verify(access)["sub"]  # noqa: E731
+            try:
+                url = await anyio.to_thread.run_sync(
+                    oauth_app.approve, store, request.path_params["request_id"], household_id_now(),
+                    str(body.get("refreshToken", "")), refresh, subject,
+                )
+            except oauth_app.OAuthError as err:
+                return oauth_error(err)
+            return JSONResponse({"redirect": url})
+
+        @mcp.custom_route("/api/oauth/requests/{request_id}/deny", methods=["POST"])
+        async def oauth_deny(request: Request) -> Response:
+            try:
+                url = await anyio.to_thread.run_sync(oauth_app.deny, store, request.path_params["request_id"])
+            except oauth_app.OAuthError as err:
+                return oauth_error(err)
+            return JSONResponse({"redirect": url})
 
     def state_response() -> Response:
         hid = household_id_now()
@@ -836,9 +898,11 @@ def create_app(
     # The last middleware added runs first: CORS, origin secret, then the sign-in checks.
     if auth:
         key = signing_key or jwks_signing_key(auth)
-        app.add_middleware(
-            BearerAuthMiddleware, verifier=TokenVerifier(auth, key, scopes=ALL_SCOPES), protects=is_mcp_path
-        )
+        mcp_verifier = TokenVerifier(auth, key, scopes=ALL_SCOPES)
+        if auth.web_client_id:
+            # Clients that signed in on Pantry Pilot's own page (oauth_app) hold the web app's tokens.
+            mcp_verifier = EitherVerifier(mcp_verifier, TokenVerifier(auth, key, client_ids={auth.web_client_id}))
+        app.add_middleware(BearerAuthMiddleware, verifier=mcp_verifier, protects=is_mcp_path)
         if auth.web_client_id:
             app.add_middleware(
                 BearerAuthMiddleware,

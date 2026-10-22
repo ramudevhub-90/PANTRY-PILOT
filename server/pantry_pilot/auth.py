@@ -129,10 +129,26 @@ def _unauthorized(detail: str) -> JSONResponse:
     return JSONResponse({"error": "invalid_token", "error_description": detail}, status_code=401)
 
 
+class EitherVerifier:
+    """Accepts a token either verifier accepts (e.g. MCP scopes, or the web app's own sign-in)."""
+
+    def __init__(self, *verifiers: TokenVerifier) -> None:
+        self._verifiers = verifiers
+
+    def verify(self, token: str) -> dict[str, Any]:
+        error: InvalidToken | None = None
+        for verifier in self._verifiers:
+            try:
+                return verifier.verify(token)
+            except InvalidToken as err:
+                error = err
+        raise error or InvalidToken("no verifier")
+
+
 class BearerAuthMiddleware:
     """Requires a valid token on paths matching `protects`, and sets `current_user` from it."""
 
-    def __init__(self, app: Any, verifier: TokenVerifier, protects: Callable[[str], bool]) -> None:
+    def __init__(self, app: Any, verifier: TokenVerifier | EitherVerifier, protects: Callable[[str], bool]) -> None:
         self.app = app
         self.verifier = verifier
         self.protects = protects

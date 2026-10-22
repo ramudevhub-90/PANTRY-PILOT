@@ -163,6 +163,11 @@ export const forgotPassword = (email: string) => call('ForgotPassword', { Userna
 export const resetPassword = (email: string, code: string, password: string) =>
   call('ConfirmForgotPassword', { Username: email, ConfirmationCode: code, Password: password });
 
+/** The signed-in session's refresh token, to hand an app the user just allowed (Claude). */
+export function currentRefreshToken(): string | null {
+  return session?.refreshToken ?? null;
+}
+
 export function signOut() {
   setSession(null);
 }

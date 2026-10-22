@@ -2745,3 +2745,43 @@ p {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* Connecting an app (Claude) through Pantry Pilot's sign-in */
+.consent {
+  display: grid;
+  gap: 12px;
+}
+
+.consent h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.consent p {
+  margin: 0;
+}
+
+.consent__icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.consent__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-2);
+}
+
+.consent__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}

@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { AuthScreen } from './AuthScreen';
+import { ConsentScreen } from './ConsentScreen';
 import { configure, currentEmail, subscribe } from './cognito';
 import { HAS_SERVER, api } from '../agent/remote';
 
@@ -10,6 +11,7 @@ type Gate = 'loading' | 'open' | 'auth' | 'offline';
 export function AuthGate({ children }: { children: ReactNode }) {
   const [gate, setGate] = useState<Gate>(HAS_SERVER ? 'loading' : 'open');
   const email = useSyncExternalStore(subscribe, currentEmail);
+  const [oauthRequest] = useState(() => new URLSearchParams(window.location.search).get('oauth'));
 
   useEffect(() => {
     if (!HAS_SERVER) return;
@@ -34,5 +36,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     );
   }
   if (gate === 'auth' && !email) return <AuthScreen />;
+  // An app like Claude sent the user here to sign in (/?oauth=<request>): ask before connecting it.
+  if (gate === 'auth' && oauthRequest) return <ConsentScreen requestId={oauthRequest} />;
   return <>{children}</>;
 }

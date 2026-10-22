@@ -270,6 +270,24 @@ export const api = {
     if (!response.ok) throw new Error(body.error ?? `Server error ${response.status}`);
     return body;
   },
+  /** An app (Claude) asking to use Pantry Pilot: its name, for the consent card. */
+  oauthRequest: async (id: string): Promise<{ client: string; redirectHost: string }> => {
+    const response = await apiFetch(`/api/oauth/requests/${encodeURIComponent(id)}`);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error_description ?? 'This sign-in link has expired.');
+    return body;
+  },
+  /** Allow or decline that app; returns where to send the browser next. */
+  answerOAuth: async (id: string, allow: boolean, refreshToken: string | null): Promise<string> => {
+    const response = await apiFetch(`/api/oauth/requests/${encodeURIComponent(id)}/${allow ? 'approve' : 'deny'}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error_description ?? 'Something went wrong. Try connecting again.');
+    return body.redirect;
+  },
   /** Email the signed-in user a sample order update; returns the address it went to. */
   testEmail: async (): Promise<string> => {
     const response = await apiFetch('/api/notify/test', { method: 'POST' });

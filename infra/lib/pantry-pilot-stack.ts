@@ -232,6 +232,8 @@ export class PantryPilotStack extends cdk.Stack {
         COGNITO_USER_POOL_ID: users.userPoolId,
         COGNITO_DOMAIN: loginDomain.baseUrl(),
         COGNITO_WEB_CLIENT_ID: webClient.userPoolClientId,
+        // Claude signs in on Pantry Pilot's own page (server/pantry_pilot/oauth_app.py).
+        COGNITO_CLAUDE_CLIENT_ID: claudeClient.userPoolClientId,
         ...(emailCodes ? { COGNITO_EMAIL_OTP: 'on' } : {}),
         ...(props.novaRoleArn ? { NOVA_ROLE_ARN: props.novaRoleArn } : {}),
         INSTACART_KEY_PARAM,
