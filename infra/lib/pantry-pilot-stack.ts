@@ -36,6 +36,8 @@ export interface PantryPilotStackProps extends cdk.StackProps {
    * Used because this account's SES is still in the sandbox.
    */
   sesRoleArn?: string;
+  /** Fixed 6-digit sign-in code for the judges' demo account (see verify-challenge.mjs). */
+  demoCode?: string;
   /** Which Instacart Developer Platform keys to use: "development" (default) or "production". */
   instacartEnv?: 'development' | 'production';
 }
@@ -117,7 +119,10 @@ export class PantryPilotStack extends cdk.Stack {
           environment: { SES_ROLE_ARN: props.sesRoleArn!, SES_REGION: this.region, FROM_ADDRESS: `no-reply@${domainName}` },
         }),
       );
-      users.addTrigger(cognito.UserPoolOperation.VERIFY_AUTH_CHALLENGE_RESPONSE, trigger('VerifyChallenge', 'verify-challenge.handler'));
+      users.addTrigger(
+        cognito.UserPoolOperation.VERIFY_AUTH_CHALLENGE_RESPONSE,
+        trigger('VerifyChallenge', 'verify-challenge.handler', props.demoCode ? { environment: { DEMO_CODE: props.demoCode } } : undefined),
+      );
       // Order emails (summary, payment link) go out the same way, with the same send-only role.
       notify = trigger('Notify', 'notify.handler', {
         role: senderRole,

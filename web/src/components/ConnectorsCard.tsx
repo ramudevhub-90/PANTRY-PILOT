@@ -27,6 +27,9 @@ function callbackParams(text: string): { code: string; state: string } | null {
 }
 
 const looksLikeCallback = (text: string) => callbackParams(text) !== null;
+/** Only the last 4 digits are shown, so the number stays private on screen and in demo videos. */
+const maskNumber = (n: string) => `${n.slice(0, 3)} ••••• ${n.slice(-4)}`;
+
 /** A clean callback address for the server, rebuilt from the code and state. */
 const callbackUrl = (text: string) => {
   const p = callbackParams(text)!;
@@ -313,7 +316,7 @@ export function ConnectorsCard() {
         {state.notifications.whatsapp && !editingWhatsapp ? (
           <>
             <span>
-              WhatsApp updates to <strong>{state.notifications.whatsapp}</strong>
+              WhatsApp updates to <strong>{maskNumber(state.notifications.whatsapp)}</strong>
             </span>
             <button type="button" className="link-btn" onClick={() => setEditingWhatsapp(true)}>
               Change

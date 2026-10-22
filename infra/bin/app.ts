@@ -20,6 +20,8 @@ const sesRoleArn: string | undefined = app.node.tryGetContext('sesRole') || unde
 // Instacart Developer Platform keys: development until Instacart approves production (-c instacart=production).
 // WhatsApp order updates: -c whatsappPhone=phone-number-id-…
 const whatsappPhoneId: string | undefined = app.node.tryGetContext('whatsappPhone') || undefined;
+// Fixed sign-in code for the judges' demo account, from the DEMO_CODE GitHub secret (off when unset).
+const demoCode: string | undefined = process.env.DEMO_CODE || undefined;
 const instacartEnv = app.node.tryGetContext('instacart') === 'production' ? 'production' : 'development';
 
 new PantryPilotStack(app, 'PantryPilot', {
@@ -32,4 +34,5 @@ new PantryPilotStack(app, 'PantryPilot', {
   sesRoleArn,
   instacartEnv,
   whatsappPhoneId,
+  demoCode,
 });

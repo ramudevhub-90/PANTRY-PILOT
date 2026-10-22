@@ -44,7 +44,7 @@ from .instacart import Instacart, InstacartError, instacart_from_env
 from .kroger import CART_URL, Kroger, KrogerError, kroger_from_env
 from .mcp_server import CONFIDENT, create_server
 from .mealtime import TimezoneMiddleware
-from .notify import WHATSAPP_TEMPLATES, Message, Notifier, NotifyUnavailable, normalise_whatsapp
+from .notify import WHATSAPP_TEMPLATES, Message, _cognito_email, Notifier, NotifyUnavailable, normalise_whatsapp
 from .models import GroceryItem, new_id
 from .nova import BedrockNova, Nova, NovaUnavailable, nova_from_env
 from .store import Store, dumps_for_api, store_from_env
@@ -69,6 +69,9 @@ class OriginSecretMiddleware:
                 return
         await self.app(scope, receive, send)
 
+
+DEMO_EMAIL = "ramu.devhub@gmail.com"
+DEMO_UNTIL = 1798761599  # 2026-12-31T23:59:59Z, same as infra/lambda/auth/verify-challenge.mjs
 
 log = logging.getLogger(__name__)
 # Lambda shows whatever reaches stderr; uvicorn only sets up its own loggers.
@@ -106,6 +109,15 @@ def create_app(
 
     def household_id_now() -> str:
         return current_user.get() or default_household
+
+    def demo_account(user: str) -> bool:
+        """The account judges sign in to with the fixed code: no real orders, no home address."""
+        if time.time() > DEMO_UNTIL:
+            return False
+        try:
+            return (_cognito_email(user) or "").lower() == DEMO_EMAIL
+        except Exception:
+            return False
 
     mcp = create_server(store, nova, household_id_now)
 
@@ -584,6 +596,8 @@ def create_app(
             return {"summary": str(err), "readback": str(err)}
         draft = ordering.save_draft(store, user, q, bill)
         text = ordering.readback(q, bill, draft["payment"], provider)
+        if q.address and demo_account(user):
+            text = text.replace(q.address, "your saved address")
         return {"summary": f"{provider.name} cart ready · {ordering.rupees(bill['total'])}", "readback": text}
 
     @mcp.tool(title="Place the order")
@@ -592,6 +606,9 @@ def create_app(
         said "place the order" themselves; never call it on "yes", "ok" or your own initiative.
         Repeat the returned summary to the user."""
         user = household_id_now()
+        if demo_account(user):
+            ordering.clear_draft(store, user)
+            return {"summary": "This is the demo account, so I won't place real orders. Everything up to the order works.", "placed": False}
         try:
             draft = ordering.confirmed_draft(store, user)
             provider = connectors.PROVIDERS[draft["app"]]

@@ -5,6 +5,7 @@
 #
 # Repository settings (Settings → Secrets and variables → Actions):
 #   Secret   ORIGIN_SECRET       value of infra/.origin-secret (lets CloudFront reach the server)
+#   Secret   DEMO_CODE           optional fixed 6-digit sign-in code for the judges' demo account
 # Optional variables override the defaults below (role ARNs and the domain are IDs, not secrets):
 #   AWS_DEPLOY_ROLE_ARN, DOMAIN, SES_ROLE_ARN, NOVA_ROLE_ARN
 
@@ -110,6 +111,7 @@ jobs:
           DOMAIN: ${{ vars.DOMAIN || 'trypantrypilot.com' }}
           SES_ROLE_ARN: ${{ vars.SES_ROLE_ARN || 'arn:aws:iam::975138397215:role/PantryPilotSesSender' }}
           NOVA_ROLE_ARN: ${{ vars.NOVA_ROLE_ARN || 'arn:aws:iam::234951664889:role/PantryPilotBedrockAccess' }}
+          DEMO_CODE: ${{ secrets.DEMO_CODE }}
           WHATSAPP_PHONE_ID: ${{ vars.WHATSAPP_PHONE_ID || 'phone-number-id-3903c68c6bc24fc09bde596f9ebf8aaa' }}
         run: |
           args=()
