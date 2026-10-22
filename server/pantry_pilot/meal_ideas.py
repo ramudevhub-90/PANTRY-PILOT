@@ -360,11 +360,14 @@ _STAPLES = {
 }
 
 
+def _spice_key(name: str) -> str:
+    key = re.sub(r"\b(powder|seeds?|ground|whole|dried|crushed|red)\b", "", name.lower().replace("chili", "chilli"))
+    return re.sub(r"\s+", " ", key).strip().rstrip("s")
+
+
 def _staple(name: str) -> bool:
     """"Turmeric powder", "red chili powder", "cumin seeds" are staples too (spelling and form aside)."""
-    key = re.sub(r"\b(powder|seeds?|ground|whole|dried|crushed)\b", "", name.lower().replace("chili", "chilli"))
-    key = re.sub(r"\s+", " ", key).strip().rstrip("s")
-    return key in {s.replace("chili", "chilli").rstrip("s") for s in _STAPLES}
+    return _spice_key(name) in {_spice_key(s) for s in _STAPLES}
 
 
 NAME_CHECK_SCHEMA: dict[str, Any] = {
