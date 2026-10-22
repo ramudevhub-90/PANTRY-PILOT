@@ -169,10 +169,27 @@ def create_app(
         def oauth_error(err: oauth_app.OAuthError) -> JSONResponse:
             return JSONResponse({"error": err.error, "error_description": err.description}, status_code=err.status)
 
+        def ours(client_id: str) -> bool:
+            return bool(refresh) and oauth_app.client(store, client_id, first_party) is not None
+
+        @mcp.custom_route("/oauth/register", methods=["POST"])
+        async def register(request: Request) -> Response:
+            """Dynamic Client Registration: MCP clients (Claude) connect with just our URL."""
+            if not refresh:
+                return JSONResponse({"error": "invalid_request", "error_description": "Registration is off."}, status_code=400)
+            try:
+                body = await request.json()
+                registered = await anyio.to_thread.run_sync(oauth_app.register, store, body if isinstance(body, dict) else {})
+            except ValueError:
+                return JSONResponse({"error": "invalid_client_metadata", "error_description": "Send JSON."}, status_code=400)
+            except oauth_app.OAuthError as err:
+                return oauth_error(err)
+            return JSONResponse(registered, status_code=201, headers={"Cache-Control": "no-store"})
+
         @mcp.custom_route("/oauth/authorize", methods=["GET"])
         async def authorize(request: Request) -> Response:
             params = dict(request.query_params)
-            if params.get("client_id") not in first_party or not refresh:
+            if not ours(params.get("client_id", "")):
                 return authorize_redirect(auth, request)
             try:
                 request_id = await anyio.to_thread.run_sync(oauth_app.start, store, params, first_party)
@@ -187,7 +204,7 @@ def create_app(
             if basic := request.headers.get("authorization", ""):
                 with contextlib.suppress(ValueError):
                     client_id = base64.b64decode(basic.split()[-1]).decode().split(":", 1)[0] or client_id
-            if client_id not in first_party or not refresh:
+            if not ours(client_id):
                 return await token_proxy(auth, request)
             try:
                 tokens = await anyio.to_thread.run_sync(oauth_app.token, store, form, client_id, refresh)
@@ -201,7 +218,11 @@ def create_app(
                 pending = oauth_app.pending(store, request.path_params["request_id"])
             except oauth_app.OAuthError as err:
                 return oauth_error(err)
-            return JSONResponse({"client": pending["client_name"], "redirectHost": urllib.parse.urlparse(pending["redirect_uri"]).netloc})
+            return JSONResponse({
+                "client": pending["client_name"],
+                "verified": pending.get("verified", True),
+                "redirectHost": urllib.parse.urlparse(pending["redirect_uri"]).netloc,
+            })
 
         @mcp.custom_route("/api/oauth/requests/{request_id}/approve", methods=["POST"])
         async def oauth_approve(request: Request) -> Response:

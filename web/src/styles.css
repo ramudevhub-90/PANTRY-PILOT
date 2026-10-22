@@ -2785,3 +2785,11 @@ p {
   gap: 10px;
   margin-top: 4px;
 }
+
+.consent__warn {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--soon-soft);
+  color: var(--soon);
+}

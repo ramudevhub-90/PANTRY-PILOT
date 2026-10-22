@@ -78,3 +78,28 @@ def test_declining_returns_access_denied():
     store = MemoryStore()
     url = oauth_app.deny(store, oauth_app.start(store, params(), CLIENTS))
     assert "error=access_denied" in url and "state=s1" in url
+
+
+def test_dynamic_registration_then_sign_in_with_just_the_url():
+    store = MemoryStore()
+    reg = oauth_app.register(store, {"client_name": "Claude", "redirect_uris": [REDIRECT], "token_endpoint_auth_method": "none"})
+    cid = reg["client_id"]
+    assert cid.startswith("pp-") and reg["token_endpoint_auth_method"] == "none"
+    request_id = oauth_app.start(store, params(client_id=cid), {})
+    assert oauth_app.pending(store, request_id)["verified"] is False
+    code = code_from(oauth_app.approve(store, request_id, "alice", "rt-alice", refresh, subject))
+    form = {"grant_type": "authorization_code", "code": code, "redirect_uri": REDIRECT, "code_verifier": VERIFIER}
+    assert oauth_app.token(store, form, cid, refresh)["access_token"] == "at-alice"
+    with pytest.raises(oauth_app.OAuthError):  # only its own registered redirect
+        oauth_app.start(store, params(client_id=cid, redirect_uri="https://claude.com/api/mcp/auth_callback"), {})
+
+
+@pytest.mark.parametrize("body", [
+    {"redirect_uris": ["http://evil.example/cb"]},
+    {"redirect_uris": []},
+    {"redirect_uris": ["https://a.example/cb#frag"]},
+    {"redirect_uris": [REDIRECT], "token_endpoint_auth_method": "client_secret_basic"},
+])
+def test_registration_rejects_unsafe_metadata(body):
+    with pytest.raises(oauth_app.OAuthError):
+        oauth_app.register(MemoryStore(), body)

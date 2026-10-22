@@ -55,13 +55,57 @@ def _code_key(code: str) -> str:
     return f"oauth-code#{hashlib.sha256(code.encode()).hexdigest()}"
 
 
+# ---------- Dynamic Client Registration (RFC 7591): an MCP client registers with just our URL ----------
+
+def _client_key(client_id: str) -> str:
+    return f"oauth-dcr#{client_id}"
+
+
+def _allowed_redirect(uri: str) -> bool:
+    parsed = urllib.parse.urlparse(uri)
+    local = parsed.hostname in ("localhost", "127.0.0.1")
+    return bool(parsed.netloc) and not parsed.fragment and (parsed.scheme == "https" or (parsed.scheme == "http" and local))
+
+
+def register(store: Store, body: dict[str, Any]) -> dict[str, Any]:
+    """Register a public client (PKCE, no secret) for the given https (or localhost) redirect URIs."""
+    redirects = body.get("redirect_uris")
+    if not isinstance(redirects, list) or not 1 <= len(redirects) <= 5 or not all(isinstance(u, str) and _allowed_redirect(u) for u in redirects):
+        raise OAuthError("invalid_redirect_uri", "Give 1 to 5 https redirect URIs (http only for localhost).")
+    if body.get("token_endpoint_auth_method", "none") != "none":
+        raise OAuthError("invalid_client_metadata", "Only public clients (token_endpoint_auth_method none) are supported.")
+    name = str(body.get("client_name") or "An app")[:60]
+    client_id = "pp-" + secrets.token_urlsafe(18)
+    now = int(time.time())
+    store.save_record(_client_key(client_id), {"name": name, "redirect_uris": redirects, "created": now})
+    return {
+        "client_id": client_id,
+        "client_id_issued_at": now,
+        "client_name": name,
+        "redirect_uris": redirects,
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": "none",
+    }
+
+
+def client(store: Store, client_id: str, first_party: dict[str, str]) -> dict[str, Any] | None:
+    """{"name", "redirect_uris", "verified"} for a client we sign in ourselves, else None."""
+    if client_id in first_party:
+        return {"name": first_party[client_id], "redirect_uris": sorted(REDIRECTS), "verified": True}
+    if client_id.startswith("pp-") and (record := store.load_record(_client_key(client_id))):
+        return {"name": record["name"], "redirect_uris": record["redirect_uris"], "verified": False}
+    return None
+
+
 def start(store: Store, params: dict[str, str], clients: dict[str, str]) -> str:
-    """Validate an authorization request from a first-party client; returns the request id."""
+    """Validate an authorization request from a client we sign in ourselves; returns the request id."""
     client_id = params.get("client_id", "")
-    if client_id not in clients:
+    known = client(store, client_id, clients)
+    if not known:
         raise OAuthError("invalid_client", "Unknown app.")
     redirect_uri = params.get("redirect_uri", "")
-    if redirect_uri not in REDIRECTS:
+    if redirect_uri not in known["redirect_uris"]:
         raise OAuthError("invalid_request", "That app's return address isn't allowed.")
     if params.get("response_type") != "code":
         raise OAuthError("unsupported_response_type", "Only the authorization code flow is supported.")
@@ -70,7 +114,8 @@ def start(store: Store, params: dict[str, str], clients: dict[str, str]) -> str:
     request_id = secrets.token_urlsafe(18)
     store.save_record(_request_key(request_id), {
         "client_id": client_id,
-        "client_name": clients[client_id],
+        "client_name": known["name"],
+        "verified": known["verified"],
         "redirect_uri": redirect_uri,
         "state": params.get("state", ""),
         "challenge": params["code_challenge"],

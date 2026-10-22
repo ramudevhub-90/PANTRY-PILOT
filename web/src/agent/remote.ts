@@ -271,7 +271,7 @@ export const api = {
     return body;
   },
   /** An app (Claude) asking to use Pantry Pilot: its name, for the consent card. */
-  oauthRequest: async (id: string): Promise<{ client: string; redirectHost: string }> => {
+  oauthRequest: async (id: string): Promise<{ client: string; verified: boolean; redirectHost: string }> => {
     const response = await apiFetch(`/api/oauth/requests/${encodeURIComponent(id)}`);
     const body = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(body.error_description ?? 'This sign-in link has expired.');

@@ -5,7 +5,7 @@ import { currentEmail, currentRefreshToken } from './cognito';
 
 /** "Claude wants to use your Pantry Pilot": shown after sign-in when an MCP client is connecting. */
 export function ConsentScreen({ requestId }: { requestId: string }) {
-  const [client, setClient] = useState<{ client: string; redirectHost: string } | null>(null);
+  const [client, setClient] = useState<{ client: string; verified: boolean; redirectHost: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -41,6 +41,12 @@ export function ConsentScreen({ requestId }: { requestId: string }) {
               <li>plan meals and set kitchen timers</li>
               <li>compare grocery prices; orders still need you to say “place the order” in Pantry Pilot</li>
             </ul>
+            {!client.verified && (
+              <p className="consent__warn small-print">
+                “{client.client}” named itself when it registered. Only allow it if you just started connecting it from{' '}
+                <strong>{client.redirectHost}</strong>.
+              </p>
+            )}
             <p className="muted small-print">You’ll go back to {client.redirectHost}. You can disconnect it there any time.</p>
             <div className="consent__actions">
               <button type="button" className="btn" disabled={busy} onClick={() => void answer(true)}>
