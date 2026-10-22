@@ -259,7 +259,7 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
             meals = []
         else:
             if not meals:
-                log.warning("Nova returned no usable meal ideas (%d raw)", len(raw))
+                log.warning("Nova returned no usable meal ideas (%d raw): %s", len(raw), [d.get("name") for d in raw])
         source = "Amazon Nova"
         if not meals:
             meals = [m for m in plan_meals(household.inventory, limit=len(RECIPES)) if suits(m, prefs)][:count]
@@ -350,8 +350,8 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
     @mcp.tool(title="Add to the grocery list")
     def build_grocery_list(items: list[str] | None = None, meal_id: str | None = None) -> dict[str, Any]:
         """Add items to the grocery list. Pass item names, or a meal_id from plan_meals to add
-        that meal's missing ingredients (defaults to the top planned meal). Expired pantry items
-        are added too when building from a meal."""
+        that meal's missing ingredients (defaults to the top planned meal). Adds only those; to
+        replace expired food, pass its names as items."""
         household = load()
         open_names = {g.name.lower() for g in household.grocery if not g.checked}
         wanted: list[GroceryItem] = []
@@ -361,7 +361,6 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
             meal = next((m for m in household.meals if m.id == meal_id), household.meals[0] if household.meals else None)
             if meal:
                 wanted += [GroceryItem(name=n, note=f"For {meal.name}") for n in meal.missing]
-            wanted += [GroceryItem(name=i.name, note="Expired") for i in household.inventory if i.days_left < 0]
         added = []
         for g in wanted:
             if g.name.lower() not in open_names:
@@ -370,6 +369,16 @@ def create_server(store: Store, nova: Nova, household_id: Callable[[], str]) -> 
                 added.append(g.name)
         save(household)
         return {"summary": f"Added {_join(added)}" if added else "Nothing new to add", "added": added}
+
+    @mcp.tool(title="Remove from the grocery list")
+    def remove_from_grocery_list(items: list[str]) -> dict[str, Any]:
+        """Take items off the grocery list (names as listed; "milk" also matches "Milk 1 L")."""
+        household = load()
+        keys = [_singular(n) for n in items if n.strip()]
+        removed = [g.name for g in household.grocery if any(k == _singular(g.name) or k in g.name.lower() for k in keys)]
+        household.grocery = [g for g in household.grocery if g.name not in removed]
+        save(household)
+        return {"summary": f"Removed {_join(removed)}" if removed else "None of those were on the list", "removed": removed}
 
     @mcp.tool(title="Read the grocery list", annotations=ToolAnnotations(read_only_hint=True))
     def get_grocery_list() -> dict[str, Any]:

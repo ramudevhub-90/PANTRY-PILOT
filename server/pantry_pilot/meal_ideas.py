@@ -239,8 +239,14 @@ def to_meals(
         if any(avoided(m, preferences) for m in mentioned):
             continue
         # The dish must be what its name says: its main ingredient is in stock and in its steps.
+        # Reject only what is clearly wrong: the dish's own main ingredient is listed as missing
+        # (a "Chingri Malai" without prawns), or the dish uses nothing at all from the pantry.
         main = str(dish.get("main_ingredient") or "").strip()
-        if main and (not _pantry_item(inventory, main) or not _mentions(steps, main)):
+        missing_raw = [str(m) for m in dish.get("missing") or []]
+        main_words = _words(main) - _GENERIC or _words(main)
+        if main and any(main_words & _words(m) for m in missing_raw):
+            continue
+        if not any(_pantry_item(inventory, str(u)) for u in dish.get("uses") or []) and not (main and _pantry_item(inventory, main)):
             continue
         uses: list[PantryItem] = []
         for wanted in dish.get("uses") or []:

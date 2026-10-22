@@ -240,11 +240,14 @@ def test_dish_whose_main_ingredient_is_missing_or_not_cooked_is_dropped():
     from pantry_pilot.models import seed_household
 
     inventory = seed_household().inventory
-    fake_chingri = {**POHA, "name": "Chingri Malai", "main_ingredient": "prawns", "steps": ["Whisk eggs.", "Add cheddar."]}
-    egg_named_wrong = {**POHA, "name": "Dimer Jhol", "main_ingredient": "eggs", "steps": ["Boil potatoes.", "Fry onions."]}
-    real = {**POHA, "name": "Dimer Jhol (egg curry)", "main_ingredient": "eggs", "steps": ["Boil the eggs.", "Simmer in the curry."]}
-    meals = to_meals([fake_chingri, egg_named_wrong, real], inventory, 3)
-    assert [m.name for m in meals] == ["Dimer Jhol (egg curry)"]
+    fake_chingri = {**POHA, "name": "Chingri Malai", "main_ingredient": "prawns", "missing": ["Prawns"], "uses": ["Eggs"],
+                    "steps": ["Whisk eggs.", "Add cheddar."]}
+    nothing_from_pantry = {**POHA, "name": "Mutton Kosha", "main_ingredient": "mutton", "uses": [], "steps": ["Cook."]}
+    greens = {**POHA, "name": "Shak Bhaji (greens stir-fry)", "main_ingredient": "greens", "uses": ["Baby spinach"],
+              "steps": ["Wilt the spinach with garlic."]}
+    real = {**POHA, "name": "Dimer Jhol (egg curry)", "main_ingredient": "eggs", "uses": ["Eggs"], "steps": ["Boil the eggs.", "Simmer in the curry."]}
+    meals = to_meals([fake_chingri, nothing_from_pantry, greens, real], inventory, 3)
+    assert [m.name for m in meals] == ["Shak Bhaji (greens stir-fry)", "Dimer Jhol (egg curry)"]
 
 
 def test_meal_questions_force_a_fresh_plan():

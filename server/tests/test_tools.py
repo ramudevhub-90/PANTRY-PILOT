@@ -40,6 +40,7 @@ def test_lists_all_tools_with_read_only_hints(store):
         "set_food_preferences": False,
         "build_grocery_list": False,
         "get_grocery_list": True,
+        "remove_from_grocery_list": False,
         "set_timer": False,
         "cancel_timer": False,
     }
@@ -112,3 +113,13 @@ def test_set_timer(store):
     result = call(store, "set_timer", {"label": "rice", "minutes": 15})
     assert result["seconds"] == 900
     assert store.load("test").timers[0].label == "rice"
+
+
+def test_grocery_from_a_meal_adds_only_its_missing_items_and_items_can_be_removed(store):
+    call(store, "plan_meals", {"meal": "dinner"})
+    added = call(store, "build_grocery_list", {})["added"]
+    missing = store.load("test").meals[0].missing
+    assert added == missing  # no expired pantry items slipped in
+    call(store, "build_grocery_list", {"items": ["milk", "eggs"]})
+    result = call(store, "remove_from_grocery_list", {"items": ["Milk"]})
+    assert result["removed"] == ["Milk"] and "Milk" not in call(store, "get_grocery_list")["items"]
