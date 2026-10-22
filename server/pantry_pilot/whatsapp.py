@@ -47,8 +47,14 @@ def parse_event(event: dict[str, Any]) -> list[Inbound]:
             log.warning("Skipping an unreadable WhatsApp event")
             continue
         for change in entry.get("changes", []):
-            for m in change.get("value", {}).get("messages", []):
+            value = change.get("value", {})
+            for m in value.get("messages", []):
                 found.append(_inbound(m))
+            # Meta reports a rejected reply later, as a status event; log it so failures are visible.
+            for st in value.get("statuses", []):
+                if st.get("status") == "failed":
+                    for err in st.get("errors", [{}]):
+                        log.warning("WhatsApp reply failed: %s %s", err.get("code"), err.get("message") or err.get("title"))
     return found
 
 
