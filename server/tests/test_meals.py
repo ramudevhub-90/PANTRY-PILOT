@@ -258,3 +258,15 @@ def test_meal_questions_force_a_fresh_plan():
     assert wants_meal_ideas("dinner please")
     assert not wants_meal_ideas("What can I make?")  # meal unknown: Alexa asks first
     assert not wants_meal_ideas("Set a 10 minute timer for the dinner rice so it doesn't burn")
+
+
+def test_unsure_traditional_name_is_replaced_by_a_plain_description():
+    from pantry_pilot.meal_ideas import to_meals
+    from pantry_pilot.models import seed_household
+
+    dish = {**POHA, "name": "Kori Rotti", "plain_name": "Bengali spinach and onion rolls", "name_matches_recipe": False,
+            "uses": ["Baby spinach"], "steps": ["Wilt the spinach.", "Roll it up."]}
+    sure = {**POHA, "name": "Aloo Bhorta (mashed potatoes)", "plain_name": "Mashed spiced potatoes", "name_matches_recipe": True,
+            "uses": ["Eggs"], "steps": ["Boil.", "Mash."]}
+    names = [m.name for m in to_meals([dish, sure], seed_household().inventory, 2)]
+    assert names == ["Bengali spinach and onion rolls", "Aloo Bhorta (mashed potatoes)"]

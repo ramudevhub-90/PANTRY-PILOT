@@ -87,6 +87,14 @@ SUGGEST_TOOL: dict[str, Any] = {
                                     "description": "Ingredients needed that are not in the pantry (not staples).",
                                 },
                                 "steps": {"type": "array", "items": {"type": "string"}},
+                                "plain_name": {
+                                    "type": "string",
+                                    "description": "A plain English description of what these steps make, e.g. Bengali spinach and onion stir-fry.",
+                                },
+                                "name_matches_recipe": {
+                                    "type": "boolean",
+                                    "description": "True only if `name` is the real, traditional name of exactly the dish these steps cook.",
+                                },
                                 "main_ingredient": {
                                     "type": "string",
                                     "description": "The ingredient the dish is named for (prawns for chingri malai, lentils for dal).",
@@ -94,7 +102,7 @@ SUGGEST_TOOL: dict[str, Any] = {
                                 "timer_label": {"type": "string", "description": "What a kitchen timer is for, e.g. rice."},
                                 "timer_minutes": {"type": "integer"},
                             },
-                            "required": ["name", "emoji", "minutes", "servings", "main_ingredient", "uses", "missing", "steps"],
+                            "required": ["name", "plain_name", "name_matches_recipe", "emoji", "minutes", "servings", "main_ingredient", "uses", "missing", "steps"],
                         },
                     }
                 },
@@ -150,7 +158,7 @@ def suggest_request(
         )
     if home and home.lower() != "local":
         cuisine_note += (
-            f". Suggest real, traditional {home} dishes by their usual names (e.g. the dish a {home} "
+            f". Decide each real, traditional {home} dish first, then write that dish's actual recipe; use its usual name (e.g. the dish a {home} "
             "family would actually call it), with a short English description in brackets. Never invent "
             f"\"{home}-Style <foreign dish>\" fusions such as pasta or stir-fries; skip pantry items that "
             "don't belong in that cuisine and pick the expiring ones that do"
@@ -232,6 +240,9 @@ def to_meals(
     seen: set[str] = {_slug(n) for n in exclude or []}
     for dish in raw:
         name = str(dish.get("name", "")).strip()
+        plain = str(dish.get("plain_name") or "").strip()
+        if plain and dish.get("name_matches_recipe") is False:
+            name = plain  # a traditional name on a different recipe misleads; describe it instead
         steps = [str(s).strip() for s in dish.get("steps") or [] if str(s).strip()][:6]
         if not name or not steps or _slug(name) in seen:
             continue
