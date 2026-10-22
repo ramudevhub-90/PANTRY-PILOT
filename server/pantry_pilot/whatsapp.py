@@ -90,6 +90,28 @@ def meta_test_number() -> tuple[str, str] | None:
     return (phone, token) if phone and token else None
 
 
+_chat_number: list[str] = []
+
+
+def chat_number() -> str:
+    """The number people message Pantry Pilot on, digits only, asked from Meta once per server
+    instance (so the web app's "Open WhatsApp" follows whichever number is configured); "" if unknown."""
+    if _chat_number:
+        return _chat_number[0]
+    meta = meta_test_number()
+    if not meta:
+        return ""
+    try:
+        reply = json.loads(_graph("GET", f"{GRAPH}/{meta[0]}?fields=display_phone_number", meta[1]))
+    except Exception:  # noqa: BLE001 - the button is hidden until it's known
+        log.info("Couldn't read the WhatsApp display number", exc_info=True)
+        return ""
+    digits = "".join(c for c in str(reply.get("display_phone_number", "")) if c.isdigit())
+    if digits:
+        _chat_number.append(digits)
+    return digits
+
+
 def _graph(method: str, url: str, token: str, body: dict[str, Any] | None = None) -> bytes:
     import urllib.request
 

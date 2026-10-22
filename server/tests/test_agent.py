@@ -109,6 +109,14 @@ def test_manual_add_to_pantry(store):
     assert inventory["Eggs"]["quantity"] == 12  # added to the 6 already there
 
 
+def test_remove_from_pantry(store):
+    with TestClient(create_app(store, MockNova(), "test")) as client:
+        eggs = next(i for i in client.get("/api/state").json()["inventory"] if i["name"] == "Eggs")
+        response = client.post("/api/pantry", json={"remove": eggs["id"]})
+    assert response.status_code == 200
+    assert "Eggs" not in {i["name"] for i in response.json()["inventory"]}
+
+
 def test_chat_explains_when_nova_is_unavailable(store):
     with TestClient(create_app(store, MockNova(), "test")) as client:
         events = turn(client, {"text": "hello"})

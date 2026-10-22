@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Camera, Check, Flame, Mic, PackageCheck, Plus, Refrigerator, Search, ShoppingBasket } from 'lucide-react';
+import { Camera, Check, Flame, Mic, PackageCheck, Plus, Refrigerator, Search, ShoppingBasket, X } from 'lucide-react';
 import { useAssistant } from '../agent/useAssistant';
 import { useKitchenActions } from '../agent/useKitchenActions';
 import { AddItemForm } from './AddItemForm';
@@ -47,7 +47,7 @@ function matches(item: PantryItem, filter: Filter): boolean {
 export function InventoryCard() {
   const { state } = usePantry();
   const { ask } = useAssistant();
-  const { addGrocery } = useKitchenActions();
+  const { addGrocery, removeFromPantry } = useKitchenActions();
   const [filter, setFilter] = useState<Filter>('all');
   const [adding, setAdding] = useState(false);
   // WhatsApp's "Open the camera" button links to /?scan=1. Browsers only open the camera on a tap,
@@ -178,6 +178,15 @@ export function InventoryCard() {
                   title={listed ? 'On the grocery list' : 'Add to grocery list'}
                 >
                   {listed ? <Check size={15} /> : <ShoppingBasket size={15} />}
+                </button>
+                <button
+                  type="button"
+                  className="pitem__remove"
+                  onClick={() => removeFromPantry(item.id)}
+                  aria-label={`Remove ${item.name} from the pantry`}
+                  title="Remove from pantry"
+                >
+                  <X size={14} />
                 </button>
               </li>
             );

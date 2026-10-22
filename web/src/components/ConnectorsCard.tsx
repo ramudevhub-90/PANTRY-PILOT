@@ -28,8 +28,6 @@ function callbackParams(text: string): { code: string; state: string } | null {
 }
 
 const looksLikeCallback = (text: string) => callbackParams(text) !== null;
-/** Pantry Pilot's WhatsApp number; messages there reach the same assistant (server/pantry_pilot/whatsapp.py). */
-const WHATSAPP_CHAT_URL = 'https://wa.me/17110578144?text=Hi';
 
 /** Only the last 4 digits are shown, so the number stays private on screen and in demo videos. */
 const maskNumber = (n: string) => `${n.slice(0, 3)} ••••• ${n.slice(-4)}`;
@@ -60,6 +58,11 @@ export function ConnectorsCard() {
   const { state, dispatch } = usePantry();
   const region = state.preferences.region;
   const [whatsapp, setWhatsapp] = useState('');
+  // Pantry Pilot's own WhatsApp number, from the server (whichever number is set up there).
+  const [chatNumber, setChatNumber] = useState('');
+  useEffect(() => {
+    api.whatsappNumber().then(setChatNumber).catch(() => setChatNumber(''));
+  }, []);
   // /?whatsapp=1 opens the in-app WhatsApp chat straight away (handy for demos).
   const [chatOpen, setChatOpen] = useState(() => new URLSearchParams(window.location.search).get('whatsapp') === '1');
   const [editingWhatsapp, setEditingWhatsapp] = useState(false);
@@ -374,8 +377,8 @@ export function ConnectorsCard() {
             <MessageCircle size={15} aria-hidden="true" />
             Try it here
           </button>
-          {state.notifications.whatsapp && (
-            <a className="btn btn--secondary btn--sm" href={WHATSAPP_CHAT_URL} target="_blank" rel="noreferrer">
+          {state.notifications.whatsapp && chatNumber && (
+            <a className="btn btn--secondary btn--sm" href={`https://wa.me/${chatNumber}?text=Hi`} target="_blank" rel="noreferrer">
               Open WhatsApp
             </a>
           )}

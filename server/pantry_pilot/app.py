@@ -49,7 +49,7 @@ from .notify import WHATSAPP_TEMPLATES, Message, _cognito_email, Notifier, Notif
 from .models import GroceryItem, new_id
 from .nova import BedrockNova, Nova, NovaUnavailable, nova_from_env
 from .store import Store, dumps_for_api, store_from_env
-from .whatsapp import READABLE_MEDIA, Inbound, WhatsApp, WhatsAppTranscript, item_lines, parse_event, verify_signature
+from .whatsapp import READABLE_MEDIA, Inbound, WhatsApp, WhatsAppTranscript, chat_number, item_lines, parse_event, verify_signature
 
 
 def _env_list(name: str) -> list[str]:
@@ -415,8 +415,16 @@ def create_app(
     @mcp.custom_route("/api/pantry", methods=["POST"])
     async def add_to_pantry(request: Request) -> Response:
         """Manual entry from the dashboard: {items: [{name, quantity, unit, category?, emoji?, expiresInDays?}]}.
-        Goes through the same update_inventory MCP tool the agent and Alexa+ use."""
-        items = (await request.json()).get("items") or []
+        Goes through the same update_inventory MCP tool the agent and Alexa+ use. {remove: id} takes
+        one item off the pantry (the row's remove button)."""
+        body = await request.json()
+        if remove := body.get("remove"):
+            hid = household_id_now()
+            household = store.load(hid)
+            household.inventory = [i for i in household.inventory if i.id != remove]
+            store.save(hid, household)
+            return state_response()
+        items = body.get("items") or []
         args = {
             "action": "add",
             "source": "manual",
@@ -1025,6 +1033,11 @@ def create_app(
         finally:
             ordering.current_turn.reset(turn)
         await send(wa.text, "\n\n".join(replies) or "Sorry, I didn't get an answer for that. Please try again.")
+
+    @mcp.custom_route("/api/whatsapp/number", methods=["GET"])
+    async def whatsapp_number(_: Request) -> Response:
+        """The number to message Pantry Pilot on, for the web app's "Open WhatsApp" button."""
+        return JSONResponse({"number": await anyio.to_thread.run_sync(chat_number)})
 
     @mcp.custom_route("/api/whatsapp/webhook", methods=["GET", "POST"])
     async def meta_webhook(request: Request) -> Response:

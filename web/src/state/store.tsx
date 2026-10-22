@@ -35,6 +35,7 @@ export interface PantryState {
 export type Action =
   | { type: 'sync_state'; state: ServerState }
   | { type: 'add_stock'; items: PantryItem[] }
+  | { type: 'remove_stock'; id: string }
   | { type: 'open_review'; images: string[] }
   | { type: 'set_review_items'; items: DetectedItem[] }
   | { type: 'update_review_item'; id: string; patch: Partial<DetectedItem> }
@@ -143,6 +144,8 @@ function reducer(state: PantryState, action: Action): PantryState {
       const fresh = action.items.filter((item) => !state.grocery.some((g) => !g.checked && sameName(g.name, item.name)));
       return { ...state, grocery: [...state.grocery, ...fresh] };
     }
+    case 'remove_stock':
+      return { ...state, inventory: state.inventory.filter((i) => i.id !== action.id) };
     case 'toggle_grocery':
       return { ...state, grocery: state.grocery.map((g) => (g.id === action.id ? { ...g, checked: !g.checked } : g)) };
     case 'clear_checked':

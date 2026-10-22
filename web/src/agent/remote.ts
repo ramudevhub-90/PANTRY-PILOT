@@ -258,6 +258,12 @@ export const api = {
     krogerCall('/api/kroger/cart', { items, modality }) as Promise<{ added: number; cartUrl: string }>,
   disconnectKroger: () => krogerCall('/api/kroger/disconnect') as Promise<KrogerStatus>,
   addToPantry: (items: NewPantryItem[]) => post('/api/pantry', { items }),
+  removeFromPantry: (id: string) => post('/api/pantry', { remove: id }),
+  /** The number to message Pantry Pilot on WhatsApp (digits only), or "" when none is set up. */
+  whatsappNumber: async (): Promise<string> => {
+    const response = await apiFetch('/api/whatsapp/number');
+    return response.ok ? ((await response.json()).number ?? '') : '';
+  },
   addGrocery: (name: string) => post('/api/grocery', { add: name }),
   toggleGrocery: (id: string) => post('/api/grocery', { toggle: id }),
   clearChecked: () => post('/api/grocery', { clearChecked: true }),

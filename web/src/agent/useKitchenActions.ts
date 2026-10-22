@@ -36,6 +36,14 @@ export function useKitchenActions() {
     [dispatch, sync],
   );
 
+  const removeFromPantry = useCallback(
+    (id: string) => {
+      dispatch({ type: 'remove_stock', id }); // optimistic
+      if (HAS_SERVER) void sync(api.removeFromPantry(id));
+    },
+    [dispatch, sync],
+  );
+
   const addGrocery = useCallback(
     (name: string) => {
       if (HAS_SERVER) return void sync(api.addGrocery(name));
@@ -65,5 +73,5 @@ export function useKitchenActions() {
     [dispatch, sync],
   );
 
-  return { addToPantry, addGrocery, toggleGrocery, clearChecked, removeTimer };
+  return { addToPantry, removeFromPantry, addGrocery, toggleGrocery, clearChecked, removeTimer };
 }
