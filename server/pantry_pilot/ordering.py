@@ -133,7 +133,7 @@ def _verified(value: Any, raw: str) -> str | None:
 _ADDRESS_SCHEMA = {
     "type": "object",
     "properties": {
-        "address_id": {"type": "string", "description": "ID of the default (or first) saved address."},
+        "address_id": {"type": "string", "description": "ID of the address labelled Home; if none, the one marked default; else the first."},
         "label": {"type": "string", "description": "Short label, e.g. Home - HSR Layout."},
     },
     "required": ["address_id"],
@@ -175,7 +175,11 @@ _PICK_HINT = (
 
 async def _address(s: AppSession, nova: Nova) -> tuple[str, str]:
     raw = await s.call("list_saved_addresses" if s.provider.id == "zepto" else "get_addresses")
-    read = await _read(nova, raw, "the default delivery address", "report_address", _ADDRESS_SCHEMA)
+    # Swiggy marks no default, so "default" alone picked whatever came first (a friend's address).
+    read = await _read(
+        nova, raw, "the user's home delivery address: the one labelled Home, else the default, else the first",
+        "report_address", _ADDRESS_SCHEMA,
+    )
     address_id = _verified(read.get("address_id"), raw)
     if not address_id:
         raise OrderError(f"Add a delivery address in the {s.provider.name} app first.")
