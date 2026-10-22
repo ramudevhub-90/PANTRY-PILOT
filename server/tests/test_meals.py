@@ -256,9 +256,11 @@ def test_main_ingredient_not_in_stock_is_listed_as_missing():
 
     squid = {**POHA, "name": "Spicy squid in coconut milk", "main_ingredient": "squid", "uses": ["Onions"], "missing": [],
              "steps": ["Fry the onions.", "Simmer the squid in coconut milk."]}
-    (meal,) = to_meals([squid], seed_household().inventory, 3)
-    assert meal.missing[0] == "squid"
-    assert meal.reason != "You have everything for this"
+    eggs = {**POHA, "name": "Egg bhurji", "main_ingredient": "eggs", "uses": ["Eggs", "Onions"], "steps": ["Beat the eggs.", "Scramble with onions."]}
+    squid_meal, egg_meal = to_meals([squid, eggs], seed_household().inventory, 3)[::-1]
+    assert squid_meal.missing[0] == "squid"
+    assert squid_meal.reason != "You have everything for this"
+    assert [m.name for m in to_meals([squid, eggs], seed_household().inventory, 3)] == ["Egg bhurji", "Spicy squid in coconut milk"]
 
 
 def test_meal_questions_force_a_fresh_plan():

@@ -242,7 +242,7 @@ def to_meals(
     """Nova's dishes as Meals, with `uses` and `rescues` checked against the real pantry. Dishes
     that use an ingredient the household avoids, or were already suggested (`exclude`), are dropped."""
     preferences = preferences or FoodPreferences()
-    meals: list[Meal] = []
+    ranked: list[tuple[bool, Meal]] = []
     seen: set[str] = {_slug(n) for n in exclude or []}
     for dish in raw:
         name = str(dish.get("name", "")).strip()
@@ -277,8 +277,8 @@ def to_meals(
         ]
         # Nova sometimes leaves the main ingredient off `missing` ("Spicy squid… have everything").
         # Only a specific main ("squid"); a broad one ("greens") may be any of several pantry items.
-        if (_words(main) - _GENERIC and not _pantry_item(inventory, main) and not _staple(main)
-                and not any(main_words & _words(m) for m in missing)):
+        main_missing = bool(_words(main) - _GENERIC) and not _pantry_item(inventory, main) and not _staple(main)
+        if main_missing and not any(main_words & _words(m) for m in missing):
             missing.insert(0, main)
         if rescues:
             verb = "they expire" if len(rescues) > 1 else "it expires"
@@ -292,7 +292,8 @@ def to_meals(
             else None
         )
         seen.add(_slug(name))
-        meals.append(
+        ranked.append((
+            main_missing,
             Meal(
                 id=_slug(name),
                 name=name[:80],
@@ -305,11 +306,10 @@ def to_meals(
                 steps=steps,
                 timer=timer,
                 reason=reason,
-            )
-        )
-        if len(meals) == limit:
-            break
-    return meals
+            ),
+        ))
+    # Dishes you can cook now come first; one whose main ingredient needs shopping goes last.
+    return [meal for _, meal in sorted(ranked, key=lambda r: r[0])][:limit]
 
 
 _MEAT = ("chicken", "mutton", "lamb", "beef", "pork", "fish", "prawn", "shrimp", "meat", "bacon", "ham", "sausage")
