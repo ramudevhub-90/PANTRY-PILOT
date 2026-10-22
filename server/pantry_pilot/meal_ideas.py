@@ -275,6 +275,11 @@ def to_meals(
             str(m).strip() for m in dish.get("missing") or []
             if str(m).strip() and not _pantry_item(inventory, str(m)) and not _staple(str(m))
         ]
+        # Nova sometimes leaves the main ingredient off `missing` ("Spicy squid… have everything").
+        # Only a specific main ("squid"); a broad one ("greens") may be any of several pantry items.
+        if (_words(main) - _GENERIC and not _pantry_item(inventory, main) and not _staple(main)
+                and not any(main_words & _words(m) for m in missing)):
+            missing.insert(0, main)
         if rescues:
             verb = "they expire" if len(rescues) > 1 else "it expires"
             reason = f"Uses {_join([r.lower() for r in rescues])} before {verb}"

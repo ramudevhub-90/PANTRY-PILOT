@@ -250,6 +250,17 @@ def test_dish_whose_main_ingredient_is_missing_or_not_cooked_is_dropped():
     assert [m.name for m in meals] == ["Shak Bhaji (greens stir-fry)", "Dimer Jhol (egg curry)"]
 
 
+def test_main_ingredient_not_in_stock_is_listed_as_missing():
+    from pantry_pilot.meal_ideas import to_meals
+    from pantry_pilot.models import seed_household
+
+    squid = {**POHA, "name": "Spicy squid in coconut milk", "main_ingredient": "squid", "uses": ["Onions"], "missing": [],
+             "steps": ["Fry the onions.", "Simmer the squid in coconut milk."]}
+    (meal,) = to_meals([squid], seed_household().inventory, 3)
+    assert meal.missing[0] == "squid"
+    assert meal.reason != "You have everything for this"
+
+
 def test_meal_questions_force_a_fresh_plan():
     from pantry_pilot.agent import wants_meal_ideas
 
