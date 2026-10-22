@@ -123,11 +123,16 @@ class WhatsApp:
             originationPhoneNumberId=self.phone_id,
             destinationS3File={"bucketName": self.media_bucket, "key": key},
         )
+        # The service appends "<media id>.<extension>" to the key it's given, so look it up by prefix.
         s3 = boto3.client("s3")
+        stored = [o["Key"] for o in s3.list_objects_v2(Bucket=self.media_bucket, Prefix=key).get("Contents", [])]
+        if not stored:
+            raise RuntimeError(f"WhatsApp media {media_id} wasn't saved to S3")
         try:
-            return s3.get_object(Bucket=self.media_bucket, Key=key)["Body"].read()
+            return s3.get_object(Bucket=self.media_bucket, Key=stored[0])["Body"].read()
         finally:
-            s3.delete_object(Bucket=self.media_bucket, Key=key)
+            for k in stored:
+                s3.delete_object(Bucket=self.media_bucket, Key=k)
 
 
 def item_lines(items: list[dict[str, Any]], limit: int = 15) -> str:
