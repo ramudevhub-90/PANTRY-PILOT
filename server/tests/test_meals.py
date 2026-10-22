@@ -287,3 +287,10 @@ def test_name_check_and_staples():
     meals = to_meals(checked, seed_household().inventory, 2)
     assert [m.name for m in meals] == ["Garlicky spinach stir-fry", "Dimer Jhol"]
     assert meals[0].missing == ["Mustard oil"]  # sugar and cloves are kitchen staples
+
+
+def test_spice_spellings_count_as_staples():
+    from pantry_pilot.meal_ideas import _staple
+
+    assert all(_staple(s) for s in ["Turmeric powder", "Red chili powder", "cumin seeds", "Cloves"])
+    assert not any(_staple(s) for s in ["Mustard oil", "Prawns", "Paneer"])

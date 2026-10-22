@@ -89,7 +89,7 @@ SUGGEST_TOOL: dict[str, Any] = {
                                 "steps": {"type": "array", "items": {"type": "string"}},
                                 "plain_name": {
                                     "type": "string",
-                                    "description": "A plain English description of what these steps make, e.g. Bengali spinach and onion stir-fry.",
+                                    "description": "A plain, specific English description of what these steps make, naming the main ingredients and how they're cooked, e.g. Fried eggplant slices with mustard oil.",
                                 },
                                 "name_matches_recipe": {
                                     "type": "boolean",
@@ -361,7 +361,10 @@ _STAPLES = {
 
 
 def _staple(name: str) -> bool:
-    return name.strip().lower().rstrip("s") in {s.rstrip("s") for s in _STAPLES}
+    """"Turmeric powder", "red chili powder", "cumin seeds" are staples too (spelling and form aside)."""
+    key = re.sub(r"\b(powder|seeds?|ground|whole|dried|crushed)\b", "", name.lower().replace("chili", "chilli"))
+    key = re.sub(r"\s+", " ", key).strip().rstrip("s")
+    return key in {s.replace("chili", "chilli").rstrip("s") for s in _STAPLES}
 
 
 NAME_CHECK_SCHEMA: dict[str, Any] = {
