@@ -77,7 +77,7 @@ WHATSAPP_HELLO = {"hi", "hello", "hey", "hii", "menu", "help", "start", "namaste
 WHATSAPP_SCAN_WORDS = {"scan", "camera", "photo", "scan groceries", "scan my groceries", "scan bill", "scan my bill"}
 WHATSAPP_BUTTON_TEXT = {"meal": "What should I cook now?", "list": "What's on my grocery list?"}
 
-DEMO_EMAIL = "ramu.devhub@gmail.com"
+DEMO_EMAILS = frozenset({"ramu.devhub@gmail.com", "ramu@mobil80.com"})  # same as verify-challenge.mjs
 DEMO_UNTIL = 1798761599  # 2026-12-31T23:59:59Z, same as infra/lambda/auth/verify-challenge.mjs
 
 log = logging.getLogger(__name__)
@@ -122,7 +122,7 @@ def create_app(
         if time.time() > DEMO_UNTIL:
             return False
         try:
-            return (_cognito_email(user) or "").lower() == DEMO_EMAIL
+            return (_cognito_email(user) or "").lower() in DEMO_EMAILS
         except Exception:
             return False
 
