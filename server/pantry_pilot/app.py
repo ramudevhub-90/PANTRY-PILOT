@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import dataclasses
 import json
 import logging
 import os
@@ -935,6 +936,21 @@ def create_app(
         scan_key = f"{household_id_now()}#whatsapp-scan"
         words = m.text.lower().strip(" !.?")
 
+        if m.kind == "audio":
+            # A voice note: hear it with Amazon Transcribe, then answer it like a typed message.
+            try:
+                audio = await anyio.to_thread.run_sync(wa.download, m.media_id)
+                heard = await anyio.to_thread.run_sync(voice.transcribe_note, audio, m.mime, getattr(wa, "media_bucket", ""))
+            except Exception:  # noqa: BLE001 - download or Transcribe failed; say so instead of going quiet
+                log.warning("WhatsApp voice note failed", exc_info=True)
+                heard = None
+            if not heard:
+                await send(wa.text, "Sorry, I couldn't hear that clearly. Please try again, or type your question." if heard == "" else "Sorry, I couldn't play that voice note. Please type your question instead.")
+                return
+            await send(wa.text, f"🎤 “{heard}”")
+            m = dataclasses.replace(m, kind="text", text=heard)
+            words = heard.lower().strip(" !.?")
+
         if m.kind in ("image", "document"):
             if m.mime not in READABLE_MEDIA:
                 await send(wa.text, "I can read photos (JPEG or PNG) and PDF bills. Please send one of those.")
@@ -997,7 +1013,7 @@ def create_app(
 
         text = WHATSAPP_BUTTON_TEXT.get(m.button, "") if m.kind == "button" else m.text
         if not text:
-            await send(wa.text, "I can read text, photos and PDF bills. Try “what should I cook?” or send a photo of your groceries.")
+            await send(wa.text, "I can read text, voice notes, photos and PDF bills. Try “what should I cook?” or send a photo of your groceries.")
             return
         replies: list[str] = []
         turn = ordering.current_turn.set({"id": new_id(), "text": text})

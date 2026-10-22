@@ -179,6 +179,14 @@ def test_language_requests_and_whats_for_dinner():
     assert wants_meal_ideas("Alexa, talk to me in Bengali. What's for dinner tonight?")
 
 
+def test_price_questions_get_a_fresh_comparison():
+    from pantry_pilot.agent import wants_price_comparison
+
+    assert wants_price_comparison("Compare prices of my grocery list on Swiggy and Zepto")
+    assert wants_price_comparison("Where is my list cheapest?")
+    assert not wants_price_comparison("How much milk do we have?")
+
+
 def test_same_language_as_i_speak():
     from pantry_pilot.agent import requested_language
 

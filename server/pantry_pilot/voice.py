@@ -9,8 +9,12 @@ hours.
 
 from __future__ import annotations
 
+import json
 import os
+import time
 import urllib.parse
+import urllib.request
+import uuid
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
@@ -94,3 +98,51 @@ def _polly_synthesize(text: str, voice_id: str, language: str) -> bytes:
         Text=text, VoiceId=voice_id, LanguageCode=language, Engine="neural", OutputFormat="mp3", SampleRate="24000"
     )
     return response["AudioStream"].read()
+
+
+# ---------- Voice notes: Amazon Transcribe batch jobs ----------
+# A WhatsApp voice note is a short OGG/Opus file. Streaming wants raw PCM, so a batch job reads it
+# from the media bucket instead; a few seconds of speech take about 10-20 seconds.
+
+NOTE_FORMATS = {"audio/ogg": "ogg", "audio/mpeg": "mp3", "audio/mp4": "mp4", "audio/aac": "mp4", "audio/amr": "amr", "audio/wav": "wav"}
+NOTE_SECONDS = 120
+
+
+def transcribe_note(audio: bytes, mime: str, bucket: str, region: str | None = None) -> str:
+    """What was said in a voice note (English or Hindi, detected), or "" if nothing was heard."""
+    fmt = NOTE_FORMATS.get(mime)
+    if not fmt or not bucket:
+        raise VoiceUnavailable("I can't play that audio format.")
+    region = region or os.environ.get("AWS_REGION", "us-east-1")
+    s3 = boto3.client("s3", region_name=region)
+    transcribe = boto3.client("transcribe", region_name=region)
+    name = f"pantry-pilot-note-{uuid.uuid4().hex}"
+    key = f"voice/{name}.{fmt}"
+    s3.put_object(Bucket=bucket, Key=key, Body=audio)
+    try:
+        transcribe.start_transcription_job(
+            TranscriptionJobName=name,
+            Media={"MediaFileUri": f"s3://{bucket}/{key}"},
+            MediaFormat=fmt,
+            IdentifyLanguage=True,
+            LanguageOptions=["en-IN", "hi-IN", "en-US"],
+        )
+        deadline = time.time() + NOTE_SECONDS
+        while True:
+            job = transcribe.get_transcription_job(TranscriptionJobName=name)["TranscriptionJob"]
+            status = job["TranscriptionJobStatus"]
+            if status == "COMPLETED":
+                with urllib.request.urlopen(job["Transcript"]["TranscriptFileUri"], timeout=15) as response:
+                    result = json.loads(response.read())
+                return " ".join(t["transcript"] for t in result["results"]["transcripts"]).strip()
+            if status == "FAILED":
+                raise VoiceUnavailable(job.get("FailureReason") or "Transcription failed")
+            if time.time() > deadline:
+                raise VoiceUnavailable("Transcription took too long")
+            time.sleep(1.5)
+    finally:
+        s3.delete_object(Bucket=bucket, Key=key)
+        try:
+            transcribe.delete_transcription_job(TranscriptionJobName=name)
+        except Exception:  # noqa: BLE001 - still running or already gone; the job expires on its own
+            pass

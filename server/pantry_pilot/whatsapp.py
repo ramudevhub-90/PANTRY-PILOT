@@ -25,7 +25,7 @@ READABLE_MEDIA = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
 class Inbound:
     id: str
     sender: str  # E.164, e.g. +919876543210
-    kind: str  # "text" | "image" | "document" | "button" | "other"
+    kind: str  # "text" | "image" | "document" | "audio" | "button" | "other"
     text: str = ""
     media_id: str = ""
     mime: str = ""
@@ -63,7 +63,7 @@ def _inbound(m: dict[str, Any]) -> Inbound:
     kind = m.get("type")
     if kind == "text":
         return Inbound(**base, kind="text", text=str(m.get("text", {}).get("body", "")).strip())
-    if kind in ("image", "document"):
+    if kind in ("image", "document", "audio"):  # audio: a voice note (OGG/Opus) or an audio file
         media = m.get(kind, {})
         return Inbound(
             **base,

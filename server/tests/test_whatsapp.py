@@ -31,6 +31,11 @@ def test_parse_text_photo_and_button():
     assert (button.kind, button.button) == ("button", "scan_add")
 
 
+def test_parse_voice_note():
+    (note,) = parse_event(sqs({"id": "m4", "from": "919876543210", "type": "audio", "audio": {"id": "media-2", "mime_type": "audio/ogg; codecs=opus", "voice": True}}))
+    assert (note.kind, note.media_id, note.mime) == ("audio", "media-2", "audio/ogg")
+
+
 def test_delivery_receipts_and_junk_are_skipped():
     receipt = {"Records": [{"body": json.dumps({"Message": json.dumps({"whatsAppWebhookEntry": json.dumps({"changes": [{"value": {"statuses": [{"status": "read"}]}}]})})})}]}
     assert parse_event(receipt) == []

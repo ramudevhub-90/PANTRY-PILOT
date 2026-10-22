@@ -97,6 +97,14 @@ def wants_meal_ideas(text: str) -> bool:
     return bool(_IDEAS.search(text)) or len(text.split()) <= 4
 
 
+_PRICES = re.compile(r"\b(cheap(er|est)?|prices?|compare)\b", re.I)
+
+
+def wants_price_comparison(text: str) -> bool:
+    """"Where is my list cheapest?", "compare prices on Swiggy and Zepto"."""
+    return bool(_PRICES.search(text))
+
+
 def plain(text: str) -> str:
     """Replies are spoken and shown as plain text, but Nova sometimes adds markdown anyway."""
     text = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: m.group(1) or m.group(2), text)
@@ -169,11 +177,17 @@ async def run_agent(
         )
     messages: list[dict[str, Any]] = [*history, {"role": "user", "content": [{"text": text}]}]
 
-    # Meal questions always get a fresh plan: answering from the chat history replayed stale dishes.
-    force_plan = wants_meal_ideas(text) and any(t["toolSpec"]["name"] == "plan_meals" for t in tools)
+    # Meal and price questions always get fresh results: answering from the chat history replayed
+    # stale dishes and old prices.
+    names = {t["toolSpec"]["name"] for t in tools}
+    forced = (
+        "plan_meals" if wants_meal_ideas(text) and "plan_meals" in names
+        else "compare_grocery_prices" if wants_price_comparison(text) and "compare_grocery_prices" in names
+        else None
+    )
 
     for step in range(max_steps):
-        choice = {"tool": {"name": "plan_meals"}} if force_plan and step == 0 else None
+        choice = {"tool": {"name": forced}} if forced and step == 0 else None
         response = await anyio.to_thread.run_sync(
             lambda: nova.converse(system=system, messages=messages, tools=tools, tool_choice=choice)
         )

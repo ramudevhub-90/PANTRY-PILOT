@@ -328,6 +328,13 @@ export class PantryPilotStack extends cdk.Stack {
           resources: [`arn:aws:social-messaging:${this.region}:${this.account}:phone-number-id/*`],
         }),
       );
+      // Voice notes: a batch Transcribe job reads the note from the media bucket.
+      server.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['transcribe:StartTranscriptionJob', 'transcribe:GetTranscriptionJob', 'transcribe:DeleteTranscriptionJob'],
+          resources: ['*'],
+        }),
+      );
       const inboxTimeout = cdk.Duration.seconds(180);
       const inboxQueue = new sqs.Queue(this, 'WhatsAppInbox', {
         visibilityTimeout: cdk.Duration.seconds(900),
