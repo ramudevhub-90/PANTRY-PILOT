@@ -67,26 +67,49 @@ def _allowed_redirect(uri: str) -> bool:
     return bool(parsed.netloc) and not parsed.fragment and (parsed.scheme == "https" or (parsed.scheme == "http" and local))
 
 
+AUTH_METHODS = ("none", "client_secret_post", "client_secret_basic")
+
+
+def _secret_hash(secret: str) -> str:
+    return hashlib.sha256(secret.encode()).hexdigest()
+
+
 def register(store: Store, body: dict[str, Any]) -> dict[str, Any]:
-    """Register a public client (PKCE, no secret) for the given https (or localhost) redirect URIs."""
+    """Register a client for the given https (or localhost) redirect URIs. Public clients (PKCE only,
+    "none") get no secret; clients that ask for client_secret_post/basic (Claude does) get one."""
     redirects = body.get("redirect_uris")
     if not isinstance(redirects, list) or not 1 <= len(redirects) <= 5 or not all(isinstance(u, str) and _allowed_redirect(u) for u in redirects):
         raise OAuthError("invalid_redirect_uri", "Give 1 to 5 https redirect URIs (http only for localhost).")
-    if body.get("token_endpoint_auth_method", "none") != "none":
-        raise OAuthError("invalid_client_metadata", "Only public clients (token_endpoint_auth_method none) are supported.")
+    method = body.get("token_endpoint_auth_method") or "none"
+    if method not in AUTH_METHODS:
+        raise OAuthError("invalid_client_metadata", f"token_endpoint_auth_method must be one of {', '.join(AUTH_METHODS)}.")
     name = str(body.get("client_name") or "An app")[:60]
     client_id = "pp-" + secrets.token_urlsafe(18)
     now = int(time.time())
-    store.save_record(_client_key(client_id), {"name": name, "redirect_uris": redirects, "created": now})
+    secret = secrets.token_urlsafe(32) if method != "none" else None
+    store.save_record(_client_key(client_id), {
+        "name": name, "redirect_uris": redirects, "created": now, "auth_method": method,
+        # Only a hash is kept; the secret itself is returned once, here.
+        **({"secret_hash": _secret_hash(secret)} if secret else {}),
+    })
     return {
         "client_id": client_id,
         "client_id_issued_at": now,
+        **({"client_secret": secret, "client_secret_expires_at": 0} if secret else {}),
         "client_name": name,
         "redirect_uris": redirects,
         "grant_types": ["authorization_code", "refresh_token"],
         "response_types": ["code"],
-        "token_endpoint_auth_method": "none",
+        "token_endpoint_auth_method": method,
     }
+
+
+def check_secret(store: Store, client_id: str, secret: str | None) -> None:
+    """Confidential registered clients must present their secret at the token endpoint."""
+    record = store.load_record(_client_key(client_id)) if client_id.startswith("pp-") else None
+    if record and record.get("secret_hash"):
+        if not secret or not secrets.compare_digest(_secret_hash(secret), record["secret_hash"]):
+            raise OAuthError("invalid_client", "Client authentication failed.", 401)
 
 
 def client(store: Store, client_id: str, first_party: dict[str, str]) -> dict[str, Any] | None:
@@ -162,8 +185,10 @@ def _pkce_ok(verifier: str, challenge: str) -> bool:
     return secrets.compare_digest(digest, challenge)
 
 
-def token(store: Store, form: dict[str, str], client_id: str, refresh: Refresh) -> dict[str, Any]:
-    """The token endpoint for first-party clients: authorization_code and refresh_token grants."""
+def token(store: Store, form: dict[str, str], client_id: str, refresh: Refresh, client_secret: str | None = None) -> dict[str, Any]:
+    """The token endpoint for clients we sign in ourselves: authorization_code and refresh_token
+    grants. Confidential clients authenticate with their secret (form body or HTTP Basic)."""
+    check_secret(store, client_id, client_secret if client_secret is not None else form.get("client_secret"))
     grant = form.get("grant_type")
     if grant == "authorization_code":
         record = store.load_record(_code_key(form.get("code", "")))

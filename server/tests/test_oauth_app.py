@@ -98,8 +98,28 @@ def test_dynamic_registration_then_sign_in_with_just_the_url():
     {"redirect_uris": ["http://evil.example/cb"]},
     {"redirect_uris": []},
     {"redirect_uris": ["https://a.example/cb#frag"]},
-    {"redirect_uris": [REDIRECT], "token_endpoint_auth_method": "client_secret_basic"},
+    {"redirect_uris": [REDIRECT], "token_endpoint_auth_method": "private_key_jwt"},
 ])
 def test_registration_rejects_unsafe_metadata(body):
     with pytest.raises(oauth_app.OAuthError):
         oauth_app.register(MemoryStore(), body)
+
+
+@pytest.mark.parametrize("method", ["client_secret_post", "client_secret_basic"])
+def test_confidential_registration_gets_a_secret_that_the_token_endpoint_checks(method):
+    store = MemoryStore()
+    reg = oauth_app.register(store, {"client_name": "Claude", "redirect_uris": [REDIRECT], "token_endpoint_auth_method": method})
+    assert reg["token_endpoint_auth_method"] == method and reg["client_secret"] and reg["client_secret_expires_at"] == 0
+    cid = reg["client_id"]
+
+    def fresh_code():
+        request_id = oauth_app.start(store, params(client_id=cid), {})
+        return code_from(oauth_app.approve(store, request_id, "alice", "rt-alice", refresh, subject))
+
+    form = {"grant_type": "authorization_code", "redirect_uri": REDIRECT, "code_verifier": VERIFIER}
+    with pytest.raises(oauth_app.OAuthError, match="Client authentication"):
+        oauth_app.token(store, {**form, "code": fresh_code()}, cid, refresh)
+    with pytest.raises(oauth_app.OAuthError, match="Client authentication"):
+        oauth_app.token(store, {**form, "code": fresh_code()}, cid, refresh, "wrong-secret")
+    tokens = oauth_app.token(store, {**form, "code": fresh_code(), "client_secret": reg["client_secret"]}, cid, refresh)
+    assert tokens["access_token"] == "at-alice"

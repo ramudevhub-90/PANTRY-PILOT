@@ -200,14 +200,16 @@ def create_app(
         @mcp.custom_route("/oauth/token", methods=["POST"])
         async def token(request: Request) -> Response:
             form = dict(urllib.parse.parse_qsl((await request.body()).decode(), keep_blank_values=True))
-            client_id = form.get("client_id", "")
-            if basic := request.headers.get("authorization", ""):
-                with contextlib.suppress(ValueError):
-                    client_id = base64.b64decode(basic.split()[-1]).decode().split(":", 1)[0] or client_id
+            client_id, client_secret = form.get("client_id", ""), form.get("client_secret")
+            if (basic := request.headers.get("authorization", "")).lower().startswith("basic "):
+                with contextlib.suppress(ValueError, UnicodeDecodeError):
+                    user, _, password = base64.b64decode(basic.split()[-1]).decode().partition(":")
+                    client_id = urllib.parse.unquote_plus(user) or client_id
+                    client_secret = urllib.parse.unquote_plus(password) or client_secret
             if not ours(client_id):
                 return await token_proxy(auth, request)
             try:
-                tokens = await anyio.to_thread.run_sync(oauth_app.token, store, form, client_id, refresh)
+                tokens = await anyio.to_thread.run_sync(oauth_app.token, store, form, client_id, refresh, client_secret)
             except oauth_app.OAuthError as err:
                 return oauth_error(err)
             return JSONResponse(tokens, headers={"Cache-Control": "no-store"})
