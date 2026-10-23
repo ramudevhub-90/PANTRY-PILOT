@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { AuthScreen } from './AuthScreen';
+import { Landing } from './Landing';
 import { ConsentScreen } from './ConsentScreen';
 import { configure, currentEmail, subscribe } from './cognito';
 import { HAS_SERVER, api } from '../agent/remote';
@@ -12,6 +13,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [gate, setGate] = useState<Gate>(HAS_SERVER ? 'loading' : 'open');
   const email = useSyncExternalStore(subscribe, currentEmail);
   const [oauthRequest] = useState(() => new URLSearchParams(window.location.search).get('oauth'));
+  // Visitors see the landing page first; links that need an account (Claude's ?oauth=, WhatsApp's ?scan=1) go straight to sign-in.
+  const [signingIn, setSigningIn] = useState(() => window.location.search.length > 1);
 
   useEffect(() => {
     if (!HAS_SERVER) return;
@@ -35,7 +38,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (gate === 'auth' && !email) return <AuthScreen />;
+  if (gate === 'auth' && !email) return signingIn ? <AuthScreen /> : <Landing onSignIn={() => setSigningIn(true)} />;
   // An app like Claude sent the user here to sign in (/?oauth=<request>): ask before connecting it.
   if (gate === 'auth' && oauthRequest) return <ConsentScreen requestId={oauthRequest} />;
   return <>{children}</>;
